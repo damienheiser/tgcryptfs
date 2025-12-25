@@ -1,0 +1,74 @@
+[package]
+name = "telegramfs"
+version = "0.1.0"
+edition = "2021"
+authors = ["TelegramFS Contributors"]
+description = "Encrypted filesystem backed by Telegram Saved Messages"
+license = "MIT"
+repository = "https://github.com/yourusername/telegramfs"
+keywords = ["filesystem", "fuse", "telegram", "encryption", "backup"]
+categories = ["filesystem", "cryptography"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Telegram client (TODO: implement with grammers when API stabilizes)
+# grammers-client = "0.8"
+# grammers-session = "0.8"
+# grammers-tl-types = "0.8"
+
+# FUSE filesystem
+fuser = "0.14"
+
+# Cryptography
+ring = "0.17"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+
+# Database - using sled to avoid sqlite conflict with grammers
+sled = "0.34"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Compression
+lz4_flex = "0.11"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Utilities
+bytes = "1"
+hex = "0.4"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+parking_lot = "0.12"
+dashmap = "5"
+blake3 = "1"
+libc = "0.2"
+nix = { version = "0.28", features = ["fs", "user"] }
+dirs = "5"
+rpassword = "7"
+
+[dev-dependencies]
+tempfile = "3"
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
