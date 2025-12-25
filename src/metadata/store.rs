@@ -14,9 +14,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, info};
 
 /// Key prefixes for different data types
+#[allow(dead_code)]
 const INODE_PREFIX: &[u8] = b"ino:";
+#[allow(dead_code)]
 const PARENT_PREFIX: &[u8] = b"par:";
+#[allow(dead_code)]
 const CHUNK_PREFIX: &[u8] = b"chk:";
+#[allow(dead_code)]
 const META_PREFIX: &[u8] = b"meta:";
 
 /// Encrypted metadata store using sled

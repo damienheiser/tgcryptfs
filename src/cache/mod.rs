@@ -13,9 +13,9 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Disk-based chunk cache with LRU eviction
 pub struct ChunkCache {

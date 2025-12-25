@@ -8,7 +8,7 @@
 use crate::crypto::{KEY_SIZE, NONCE_SIZE, TAG_SIZE};
 use crate::error::{Error, Result};
 use rand::RngCore;
-use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use serde::{Deserialize, Serialize};
 
 /// Encrypted data container with nonce and authentication tag
@@ -125,11 +125,13 @@ pub fn decrypt(key: &[u8; KEY_SIZE], encrypted: &EncryptedData, aad: &[u8]) -> R
 }
 
 /// Encrypt with empty AAD (convenience function)
+#[allow(dead_code)]
 pub fn encrypt_simple(key: &[u8; KEY_SIZE], plaintext: &[u8]) -> Result<EncryptedData> {
     encrypt(key, plaintext, &[])
 }
 
 /// Decrypt with empty AAD (convenience function)
+#[allow(dead_code)]
 pub fn decrypt_simple(key: &[u8; KEY_SIZE], encrypted: &EncryptedData) -> Result<Vec<u8>> {
     decrypt(key, encrypted, &[])
 }

@@ -189,8 +189,22 @@ fn cmd_init(
 
     // Create default config
     let mut config = Config::default();
-    config.telegram.api_id = api_id;
-    config.telegram.api_hash = api_hash;
+
+    // Use provided args or fall back to environment variables
+    config.telegram.api_id = if api_id != 0 {
+        api_id
+    } else if let Ok(env_id) = std::env::var("TELEGRAM_APP_ID") {
+        env_id.parse().unwrap_or(0)
+    } else {
+        0
+    };
+
+    config.telegram.api_hash = if !api_hash.is_empty() {
+        api_hash
+    } else {
+        std::env::var("TELEGRAM_APP_HASH").unwrap_or_default()
+    };
+
     config.telegram.phone = phone;
 
     // Ensure config directory exists
@@ -395,7 +409,7 @@ fn cmd_status(config_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_snapshot(config_path: &PathBuf, name: &str, description: Option<String>) -> Result<()> {
+fn cmd_snapshot(_config_path: &PathBuf, name: &str, description: Option<String>) -> Result<()> {
     info!("Creating snapshot '{}'...", name);
 
     // This would require loading the full filesystem state
@@ -406,14 +420,14 @@ fn cmd_snapshot(config_path: &PathBuf, name: &str, description: Option<String>) 
     Ok(())
 }
 
-fn cmd_list_snapshots(config_path: &PathBuf) -> Result<()> {
+fn cmd_list_snapshots(_config_path: &PathBuf) -> Result<()> {
     println!("Snapshots:");
     println!("==========");
     println!("(Snapshot listing not yet fully implemented)");
     Ok(())
 }
 
-fn cmd_restore(config_path: &PathBuf, snapshot: &str) -> Result<()> {
+fn cmd_restore(_config_path: &PathBuf, snapshot: &str) -> Result<()> {
     info!("Restoring from snapshot '{}'...", snapshot);
     println!("Snapshot restoration not yet fully implemented");
     Ok(())
@@ -445,7 +459,7 @@ fn cmd_cache(config_path: &PathBuf, clear: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_sync(config_path: &PathBuf, full: bool) -> Result<()> {
+fn cmd_sync(_config_path: &PathBuf, full: bool) -> Result<()> {
     info!("Syncing with Telegram...");
 
     if full {

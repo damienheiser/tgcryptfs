@@ -66,7 +66,7 @@ Your data remains encrypted end-to-end — Telegram only sees encrypted blobs.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/telegramfs.git
+git clone https://github.com/damienheiser/telegramfs.git
 cd telegramfs
 
 # Build

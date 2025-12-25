@@ -126,11 +126,13 @@ impl ExponentialBackoff {
     }
 
     /// Reset the backoff
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.current_attempt = 0;
     }
 
     /// Check if we have attempts remaining
+    #[allow(dead_code)]
     pub fn has_attempts(&self) -> bool {
         self.current_attempt < self.max_attempts
     }

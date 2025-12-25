@@ -1,26 +1,23 @@
 //! Main FUSE filesystem implementation
 
 use crate::cache::ChunkCache;
-use crate::chunk::{compress_or_original, decompress, Chunk, ChunkManifest, ChunkRef, Chunker};
+use crate::chunk::{compress_or_original, decompress, ChunkManifest, ChunkRef, Chunker};
 use crate::config::Config;
-use crate::crypto::{decrypt, encrypt, KeyManager, KEY_SIZE};
+use crate::crypto::{decrypt, encrypt, KeyManager};
 use crate::error::{Error, Result};
 use crate::fs::handle::HandleManager;
-use crate::metadata::{FileType, Inode, MetadataStore};
+use crate::metadata::{Inode, MetadataStore};
 use crate::telegram::TelegramBackend;
 
 use fuser::{
-    FileAttr, FileType as FuserFileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData,
+    FileType as FuserFileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData,
     ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow,
 };
-use libc::c_int;
-use parking_lot::RwLock;
 use std::ffi::OsStr;
-use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::runtime::Runtime;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error};
 
 /// TTL for cached attributes
 const TTL: Duration = Duration::from_secs(1);

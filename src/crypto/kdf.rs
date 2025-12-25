@@ -87,6 +87,7 @@ pub fn derive_key(
 }
 
 /// Generate a random salt
+#[allow(dead_code)]
 pub fn generate_salt() -> [u8; SALT_SIZE] {
     let mut salt = [0u8; SALT_SIZE];
     rand::thread_rng().fill_bytes(&mut salt);

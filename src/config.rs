@@ -261,17 +261,78 @@ impl Default for VersioningConfig {
 }
 
 impl Config {
-    /// Load configuration from a file
+    /// Load configuration from a file, with environment variable overrides
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
             Error::Config(format!("Failed to read config file: {}", e))
         })?;
 
-        let config: Config = serde_json::from_str(&content).map_err(|e| {
+        let mut config: Config = serde_json::from_str(&content).map_err(|e| {
             Error::Config(format!("Failed to parse config file: {}", e))
         })?;
 
+        // Override with environment variables if set
+        config.apply_env_overrides();
+
         config.validate()?;
+        Ok(config)
+    }
+
+    /// Apply environment variable overrides to configuration
+    pub fn apply_env_overrides(&mut self) {
+        // Telegram credentials from environment
+        if let Ok(api_id) = std::env::var("TELEGRAM_APP_ID") {
+            if let Ok(id) = api_id.trim().parse::<i32>() {
+                self.telegram.api_id = id;
+            }
+        }
+
+        if let Ok(api_hash) = std::env::var("TELEGRAM_APP_HASH") {
+            let hash = api_hash.trim().to_string();
+            if !hash.is_empty() {
+                self.telegram.api_hash = hash;
+            }
+        }
+
+        if let Ok(phone) = std::env::var("TELEGRAM_PHONE") {
+            let phone = phone.trim().to_string();
+            if !phone.is_empty() {
+                self.telegram.phone = Some(phone);
+            }
+        }
+
+        // Cache settings
+        if let Ok(cache_size) = std::env::var("TELEGRAMFS_CACHE_SIZE") {
+            if let Ok(size) = cache_size.trim().parse::<u64>() {
+                self.cache.max_size = size;
+            }
+        }
+
+        // Chunk settings
+        if let Ok(chunk_size) = std::env::var("TELEGRAMFS_CHUNK_SIZE") {
+            if let Ok(size) = chunk_size.trim().parse::<usize>() {
+                self.chunk.chunk_size = size;
+            }
+        }
+    }
+
+    /// Create a new config from environment variables only (for init without existing config)
+    pub fn from_env() -> Result<Self> {
+        let mut config = Config::default();
+        config.apply_env_overrides();
+
+        // For from_env, we require API credentials
+        if config.telegram.api_id == 0 {
+            return Err(Error::InvalidConfig(
+                "TELEGRAM_APP_ID environment variable is required".to_string(),
+            ));
+        }
+        if config.telegram.api_hash.is_empty() {
+            return Err(Error::InvalidConfig(
+                "TELEGRAM_APP_HASH environment variable is required".to_string(),
+            ));
+        }
+
         Ok(config)
     }
 

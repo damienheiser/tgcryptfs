@@ -107,7 +107,7 @@ impl VersionManager {
     /// Get chunks that are only referenced by old versions
     /// (for garbage collection)
     pub fn get_orphaned_chunks(&self, ino: u64, current_manifest: &ChunkManifest) -> Vec<String> {
-        let mut current_chunks: std::collections::HashSet<_> =
+        let current_chunks: std::collections::HashSet<_> =
             current_manifest.chunks.iter().map(|c| c.id.clone()).collect();
 
         let mut all_chunks: std::collections::HashSet<String> = std::collections::HashSet::new();

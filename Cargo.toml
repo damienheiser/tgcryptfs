@@ -14,9 +14,9 @@ categories = ["filesystem", "cryptography"]
 tokio = { version = "1", features = ["full"] }
 
 # Telegram client
-grammers-client = "0.6"
-grammers-session = "0.6"
-grammers-tl-types = "0.6"
+grammers-client = "0.8"
+grammers-session = "0.8"
+grammers-tl-types = "0.8"
 
 # FUSE filesystem
 fuser = "0.14"

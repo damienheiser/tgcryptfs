@@ -178,6 +178,7 @@ impl Chunker {
 }
 
 /// Deduplication tracker
+#[allow(dead_code)]
 pub struct DedupTracker {
     /// Known chunk IDs
     known_chunks: std::collections::HashSet<ChunkId>,
@@ -185,6 +186,7 @@ pub struct DedupTracker {
 
 impl DedupTracker {
     /// Create a new dedup tracker
+    #[allow(dead_code)]
     pub fn new() -> Self {
         DedupTracker {
             known_chunks: std::collections::HashSet::new(),
@@ -192,26 +194,31 @@ impl DedupTracker {
     }
 
     /// Check if a chunk is already known
+    #[allow(dead_code)]
     pub fn is_known(&self, chunk_id: &str) -> bool {
         self.known_chunks.contains(chunk_id)
     }
 
     /// Register a chunk as known
+    #[allow(dead_code)]
     pub fn register(&mut self, chunk_id: ChunkId) {
         self.known_chunks.insert(chunk_id);
     }
 
     /// Get the number of known chunks
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.known_chunks.len()
     }
 
     /// Check if empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.known_chunks.is_empty()
     }
 
     /// Filter chunks, returning only new ones
+    #[allow(dead_code)]
     pub fn filter_new(&mut self, chunks: Vec<Chunk>) -> (Vec<Chunk>, Vec<ChunkId>) {
         let mut new_chunks = Vec::new();
         let mut existing_ids = Vec::new();

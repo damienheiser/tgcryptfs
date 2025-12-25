@@ -5,7 +5,7 @@
 //! - Metadata Key: Encrypts filesystem metadata
 //! - Chunk Keys: Per-chunk keys derived from master key + chunk ID
 
-use crate::crypto::{derive_key, DerivedKey, KEY_SIZE, SALT_SIZE};
+use crate::crypto::{derive_key, KEY_SIZE, SALT_SIZE};
 use crate::config::EncryptionConfig;
 use crate::error::{Error, Result};
 use ring::hkdf::{self, Salt, HKDF_SHA256};

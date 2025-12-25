@@ -1,6 +1,5 @@
 //! File handle management
 
-use crate::chunk::Chunk;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -106,7 +105,8 @@ impl HandleManager {
     }
 
     /// Get a handle by ID
-    pub fn get(&self, fh: u64) -> Option<std::sync::Arc<FileHandle>> {
+    #[allow(dead_code)]
+    pub fn get(&self, _fh: u64) -> Option<std::sync::Arc<FileHandle>> {
         // Note: This is simplified. In production, you'd use Arc for sharing.
         None // Placeholder
     }
@@ -117,6 +117,7 @@ impl HandleManager {
     }
 
     /// Get handle reference for operations
+    #[allow(dead_code)]
     pub fn with_handle<F, R>(&self, fh: u64, f: F) -> Option<R>
     where
         F: FnOnce(&FileHandle) -> R,
@@ -133,11 +134,13 @@ impl HandleManager {
     }
 
     /// Check if a handle is valid
+    #[allow(dead_code)]
     pub fn is_valid(&self, fh: u64) -> bool {
         self.handles.read().contains_key(&fh)
     }
 
     /// Get all handles for an inode
+    #[allow(dead_code)]
     pub fn handles_for_ino(&self, ino: u64) -> Vec<u64> {
         self.handles
             .read()
