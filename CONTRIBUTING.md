@@ -1,6 +1,6 @@
-# Contributing to TelegramFS
+# Contributing to tgcryptfs
 
-Thank you for your interest in contributing to TelegramFS! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to tgcryptfs! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -22,12 +22,12 @@ By participating in this project, you agree to maintain a respectful and inclusi
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/telegramfs.git
-   cd telegramfs
+   git clone https://github.com/YOUR_USERNAME/tgcryptfs.git
+   cd tgcryptfs
    ```
 3. Add the upstream repository:
    ```bash
-   git remote add upstream https://github.com/damienheiser/telegramfs.git
+   git remote add upstream https://github.com/damienheiser/tgcryptfs.git
    ```
 
 ## Development Setup
@@ -141,7 +141,7 @@ mod tests {
    ```
 
 3. Create a Pull Request:
-   - Go to the [TelegramFS repository](https://github.com/damienheiser/telegramfs)
+   - Go to the [tgcryptfs repository](https://github.com/damienheiser/tgcryptfs)
    - Click "New Pull Request"
    - Select your fork and branch
    - Fill in the PR template with:
@@ -191,7 +191,7 @@ mod tests {
 ## Project Structure
 
 ```
-telegramfs/
+tgcryptfs/
 ├── src/
 │   ├── main.rs           # Entry point and CLI
 │   ├── lib.rs            # Library root
@@ -219,8 +219,8 @@ telegramfs/
 
 ## License
 
-By contributing to TelegramFS, you agree that your contributions will be licensed under the MIT License.
+By contributing to tgcryptfs, you agree that your contributions will be licensed under the MIT License.
 
 ---
 
-Thank you for contributing to TelegramFS!
+Thank you for contributing to tgcryptfs!
