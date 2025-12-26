@@ -41,17 +41,44 @@ pub struct MetadataStore {
     next_ino: AtomicU64,
     /// In-memory inode cache
     cache: RwLock<HashMap<u64, Inode>>,
+    /// Optional namespace prefix for storage keys
+    namespace_prefix: Option<String>,
 }
 
 impl MetadataStore {
     /// Open or create a metadata store
     pub fn open<P: AsRef<Path>>(path: P, key: [u8; KEY_SIZE]) -> Result<Self> {
+        Self::open_with_namespace(path, key, None)
+    }
+
+    /// Open or create a metadata store with a namespace prefix
+    pub fn open_with_namespace<P: AsRef<Path>>(
+        path: P,
+        key: [u8; KEY_SIZE],
+        namespace_prefix: Option<String>,
+    ) -> Result<Self> {
         let db = sled::open(path.as_ref())?;
 
-        let inodes = db.open_tree("inodes")?;
-        let parent_index = db.open_tree("parent_index")?;
-        let chunks = db.open_tree("chunks")?;
-        let metadata = db.open_tree("metadata")?;
+        // Use namespace-prefixed tree names if namespace is provided
+        let (inodes_name, parent_name, chunks_name, metadata_name) = match &namespace_prefix {
+            Some(prefix) => (
+                format!("{}:inodes", prefix),
+                format!("{}:parent_index", prefix),
+                format!("{}:chunks", prefix),
+                format!("{}:metadata", prefix),
+            ),
+            None => (
+                "inodes".to_string(),
+                "parent_index".to_string(),
+                "chunks".to_string(),
+                "metadata".to_string(),
+            ),
+        };
+
+        let inodes = db.open_tree(&inodes_name)?;
+        let parent_index = db.open_tree(&parent_name)?;
+        let chunks = db.open_tree(&chunks_name)?;
+        let metadata = db.open_tree(&metadata_name)?;
 
         // Get max inode number
         let max_ino = inodes
@@ -77,6 +104,7 @@ impl MetadataStore {
             key,
             next_ino: AtomicU64::new(max_ino + 1),
             cache: RwLock::new(HashMap::new()),
+            namespace_prefix,
         };
 
         // Initialize root if needed
@@ -84,18 +112,45 @@ impl MetadataStore {
             store.init_root()?;
         }
 
-        info!("Metadata store opened, max inode: {}", max_ino);
+        info!(
+            "Metadata store opened, max inode: {}, namespace: {:?}",
+            max_ino, store.namespace_prefix
+        );
         Ok(store)
     }
 
     /// Create an in-memory store (for testing)
     pub fn in_memory(key: [u8; KEY_SIZE]) -> Result<Self> {
+        Self::in_memory_with_namespace(key, None)
+    }
+
+    /// Create an in-memory store with namespace prefix (for testing)
+    pub fn in_memory_with_namespace(
+        key: [u8; KEY_SIZE],
+        namespace_prefix: Option<String>,
+    ) -> Result<Self> {
         let db = sled::Config::new().temporary(true).open()?;
 
-        let inodes = db.open_tree("inodes")?;
-        let parent_index = db.open_tree("parent_index")?;
-        let chunks = db.open_tree("chunks")?;
-        let metadata = db.open_tree("metadata")?;
+        // Use namespace-prefixed tree names if namespace is provided
+        let (inodes_name, parent_name, chunks_name, metadata_name) = match &namespace_prefix {
+            Some(prefix) => (
+                format!("{}:inodes", prefix),
+                format!("{}:parent_index", prefix),
+                format!("{}:chunks", prefix),
+                format!("{}:metadata", prefix),
+            ),
+            None => (
+                "inodes".to_string(),
+                "parent_index".to_string(),
+                "chunks".to_string(),
+                "metadata".to_string(),
+            ),
+        };
+
+        let inodes = db.open_tree(&inodes_name)?;
+        let parent_index = db.open_tree(&parent_name)?;
+        let chunks = db.open_tree(&chunks_name)?;
+        let metadata = db.open_tree(&metadata_name)?;
 
         let store = MetadataStore {
             db,
@@ -106,6 +161,7 @@ impl MetadataStore {
             key,
             next_ino: AtomicU64::new(1),
             cache: RwLock::new(HashMap::new()),
+            namespace_prefix,
         };
 
         store.init_root()?;
@@ -352,6 +408,16 @@ impl MetadataStore {
     pub fn flush(&self) -> Result<()> {
         self.db.flush()?;
         Ok(())
+    }
+
+    /// Get the namespace prefix
+    pub fn namespace_prefix(&self) -> Option<&str> {
+        self.namespace_prefix.as_deref()
+    }
+
+    /// Check if this store is namespaced
+    pub fn is_namespaced(&self) -> bool {
+        self.namespace_prefix.is_some()
     }
 }
 

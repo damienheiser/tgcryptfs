@@ -7,6 +7,7 @@ pub mod cache;
 pub mod chunk;
 pub mod config;
 pub mod crypto;
+pub mod distributed;
 pub mod error;
 pub mod fs;
 pub mod metadata;

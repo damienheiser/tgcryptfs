@@ -101,6 +101,22 @@ pub enum Error {
     #[error("Version not found: {0}")]
     VersionNotFound(u64),
 
+    // CRDT / Distributed errors
+    #[error("Operation conflict: {0}")]
+    OperationConflict(String),
+
+    #[error("Operation not found: {0}")]
+    OperationNotFound(String),
+
+    #[error("Vector clock error: {0}")]
+    VectorClock(String),
+
+    #[error("Sync error: {0}")]
+    Sync(String),
+
+    #[error("Duplicate operation: {0}")]
+    DuplicateOperation(String),
+
     // Config errors
     #[error("Configuration error: {0}")]
     Config(String),
