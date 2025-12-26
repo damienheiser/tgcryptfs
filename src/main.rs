@@ -83,6 +83,10 @@ enum Commands {
         /// Allow other users to access the mount
         #[arg(long)]
         allow_other: bool,
+
+        /// Read encryption password from file
+        #[arg(long)]
+        password_file: Option<PathBuf>,
     },
 
     /// Unmount the filesystem
@@ -244,7 +248,8 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
             mount_point,
             foreground,
             allow_other,
-        } => cmd_mount(config_path, &mount_point, foreground, allow_other),
+            password_file,
+        } => cmd_mount(config_path, &mount_point, foreground, allow_other, password_file),
 
         Commands::Unmount { mount_point } => cmd_unmount(&mount_point),
 
@@ -406,6 +411,7 @@ fn cmd_mount(
     mount_point: &PathBuf,
     foreground: bool,
     allow_other: bool,
+    password_file: Option<PathBuf>,
 ) -> Result<()> {
     let mut config = Config::load(config_path)?;
     config.mount.mount_point = mount_point.clone();
@@ -414,8 +420,15 @@ fn cmd_mount(
     info!("Starting TelegramFS...");
 
     // Get password for key derivation
-    let password = rpassword::prompt_password("Enter encryption password: ")
-        .map_err(|e| Error::Internal(e.to_string()))?;
+    let password = if let Some(path) = password_file {
+        std::fs::read_to_string(&path)
+            .map_err(|e| Error::Internal(format!("Failed to read password file: {}", e)))?
+            .trim()
+            .to_string()
+    } else {
+        rpassword::prompt_password("Enter encryption password: ")
+            .map_err(|e| Error::Internal(e.to_string()))?
+    };
 
     // Derive master key
     let master_key = MasterKey::from_password(password.as_bytes(), &config.encryption)?;
