@@ -4,88 +4,13 @@
 //! distributed filesystem operations. It enables multiple nodes to perform
 //! concurrent writes with automatic conflict resolution.
 
+use crate::distributed::VectorClock;
 use crate::error::{Error, Result};
 use crate::metadata::{FileType, InodeAttributes};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 use uuid::Uuid;
-
-/// Vector clock for tracking causality between operations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VectorClock {
-    /// Machine ID -> logical timestamp
-    pub clocks: HashMap<Uuid, u64>,
-}
-
-impl VectorClock {
-    /// Create a new empty vector clock
-    pub fn new() -> Self {
-        VectorClock {
-            clocks: HashMap::new(),
-        }
-    }
-
-    /// Increment the clock for a specific machine
-    pub fn increment(&mut self, machine_id: Uuid) {
-        *self.clocks.entry(machine_id).or_insert(0) += 1;
-    }
-
-    /// Get the current time for a machine
-    pub fn get(&self, machine_id: &Uuid) -> u64 {
-        self.clocks.get(machine_id).copied().unwrap_or(0)
-    }
-
-    /// Merge another vector clock into this one (take max of each entry)
-    pub fn merge(&mut self, other: &VectorClock) {
-        for (id, &time) in &other.clocks {
-            let entry = self.clocks.entry(*id).or_insert(0);
-            *entry = (*entry).max(time);
-        }
-    }
-
-    /// Check if this clock happened before another clock (causally)
-    /// Returns true if self < other
-    pub fn happened_before(&self, other: &VectorClock) -> bool {
-        let mut strict_less = false;
-
-        // Check all entries in self
-        for (id, &self_time) in &self.clocks {
-            let other_time = other.get(id);
-            if self_time > other_time {
-                return false; // self is not <= other
-            }
-            if self_time < other_time {
-                strict_less = true;
-            }
-        }
-
-        // Check entries only in other
-        for (id, &other_time) in &other.clocks {
-            if !self.clocks.contains_key(id) && other_time > 0 {
-                strict_less = true;
-            }
-        }
-
-        strict_less
-    }
-
-    /// Check if two clocks are concurrent (neither happened before the other)
-    pub fn concurrent(&self, other: &VectorClock) -> bool {
-        !self.happened_before(other) && !other.happened_before(self)
-    }
-
-    /// Check if this clock happened after another clock
-    pub fn happened_after(&self, other: &VectorClock) -> bool {
-        other.happened_before(self)
-    }
-}
-
-impl Default for VectorClock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// CRDT operation types for filesystem operations
 #[derive(Debug, Clone, Serialize, Deserialize)]

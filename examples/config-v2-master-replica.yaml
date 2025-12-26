@@ -1,0 +1,62 @@
+# TelegramFS Configuration v2 - Master-Replica Mode Example
+version: 2
+
+# Machine identity
+machine:
+  id: "cloudyday-server"
+  name: "Cloudyday Production Server"
+
+# Telegram backend
+telegram:
+  api_id: ${TELEGRAM_APP_ID}
+  api_hash: ${TELEGRAM_APP_HASH}
+  session_file: "~/.telegramfs/session"
+  max_concurrent_uploads: 3
+  max_concurrent_downloads: 5
+  retry_attempts: 3
+  retry_base_delay_ms: 1000
+
+# Encryption
+encryption:
+  argon2_memory_kib: 65536
+  argon2_iterations: 3
+  argon2_parallelism: 4
+  salt: ""
+
+# Distribution mode
+distribution:
+  mode: master-replica
+  cluster_id: "production"
+
+  # Master-Replica settings
+  master_replica:
+    role: master  # master | replica
+    master_id: "cloudyday-server"
+    sync_interval_secs: 60
+    snapshot_retention: 10
+
+# Namespaces
+namespaces:
+  # Private namespace
+  - name: "private"
+    type: standalone
+    mount_point: "/mnt/telegramfs/private"
+
+  # Shared namespace (master-replica)
+  - name: "backups"
+    type: master-replica
+    master: "cloudyday-server"
+    mount_point: "/mnt/telegramfs/backups"
+
+# Cache settings
+cache:
+  max_size: 1073741824
+  cache_dir: "~/.telegramfs/cache"
+  prefetch_enabled: true
+  prefetch_count: 3
+  eviction_policy: Lru
+
+# Logging
+logging:
+  level: "info"
+  file: "~/.telegramfs/telegramfs.log"

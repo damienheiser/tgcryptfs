@@ -1,0 +1,67 @@
+# TelegramFS Configuration v2 - Distributed Mode Example
+version: 2
+
+# Machine identity
+machine:
+  id: "cloudyday-server"  # or "auto" to auto-generate UUID
+  name: "Cloudyday Production Server"
+
+# Telegram backend
+telegram:
+  api_id: ${TELEGRAM_APP_ID}
+  api_hash: ${TELEGRAM_APP_HASH}
+  phone: null
+  session_file: "~/.telegramfs/session"
+  max_concurrent_uploads: 3
+  max_concurrent_downloads: 5
+  retry_attempts: 3
+  retry_base_delay_ms: 1000
+
+# Encryption
+encryption:
+  argon2_memory_kib: 65536  # 64 MiB
+  argon2_iterations: 3
+  argon2_parallelism: 4
+  salt: ""  # Auto-generated on first run
+
+# Distribution mode
+distribution:
+  mode: distributed  # standalone | master-replica | distributed
+  cluster_id: "home-cluster"
+
+  # Distributed CRDT settings
+  distributed:
+    sync_interval_ms: 1000
+    conflict_resolution: last-write-wins  # last-write-wins | manual | merge
+    operation_log_retention_hours: 168  # 7 days
+
+# Namespaces
+namespaces:
+  # Private namespace (standalone)
+  - name: "private"
+    type: standalone
+    mount_point: "/mnt/telegramfs/private"
+
+  # Shared namespace (distributed)
+  - name: "shared"
+    type: distributed
+    cluster: "home-cluster"
+    mount_point: "/mnt/telegramfs/shared"
+    access:
+      - machine: "cloudyday-server"
+        permissions: [read, write, delete, admin]
+      - machine: "pleasure-mac"
+        permissions: [read, write]
+
+# Cache settings
+cache:
+  max_size: 1073741824  # 1 GB
+  cache_dir: "~/.telegramfs/cache"
+  prefetch_enabled: true
+  prefetch_count: 3
+  eviction_policy: Lru  # Lru | Lfu | Fifo
+
+# Logging
+logging:
+  level: "info"  # trace | debug | info | warn | error
+  file: "~/.telegramfs/telegramfs.log"
