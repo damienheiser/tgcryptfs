@@ -1,19 +1,19 @@
-//! TelegramFS - Encrypted filesystem backed by Telegram Saved Messages
+//! tgcryptfs - Encrypted cloud-backed filesystem
 //!
 //! Usage:
-//!   telegramfs mount <mount_point>  - Mount the filesystem
-//!   telegramfs init                 - Initialize a new filesystem
-//!   telegramfs auth                 - Authenticate with Telegram
-//!   telegramfs status               - Show filesystem status
-//!   telegramfs snapshot <name>      - Create a snapshot
+//!   tgcryptfs mount <mount_point>  - Mount the filesystem
+//!   tgcryptfs init                 - Initialize a new filesystem
+//!   tgcryptfs auth                 - Authenticate with the cloud backend
+//!   tgcryptfs status               - Show filesystem status
+//!   tgcryptfs snapshot <name>      - Create a snapshot
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use telegramfs::{
+use tgcryptfs::{
     cache::ChunkCache,
     config::Config,
     crypto::{KeyManager, MasterKey},
-    fs::TelegramFs,
+    fs::TgCryptFs,
     metadata::MetadataStore,
     telegram::TelegramBackend,
     Error, Result,
@@ -22,13 +22,13 @@ use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
-#[command(name = "telegramfs")]
-#[command(author = "TelegramFS Contributors")]
+#[command(name = "tgcryptfs")]
+#[command(author = "tgcryptfs Contributors")]
 #[command(version = "0.1.0")]
-#[command(about = "Encrypted filesystem backed by Telegram Saved Messages")]
+#[command(about = "Encrypted cloud-backed filesystem")]
 struct Cli {
     /// Configuration file path
-    #[arg(short, long, default_value = "~/.config/telegramfs/config.json")]
+    #[arg(short, long, default_value = "~/.config/tgcryptfs/config.json")]
     config: PathBuf,
 
     /// Enable verbose logging
@@ -41,13 +41,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new TelegramFS
+    /// Initialize a new tgcryptfs
     Init {
-        /// Telegram API ID (from my.telegram.org)
+        /// API ID (from my.telegram.org)
         #[arg(long)]
         api_id: i32,
 
-        /// Telegram API hash
+        /// API hash
         #[arg(long)]
         api_hash: String,
 
@@ -56,7 +56,7 @@ enum Commands {
         phone: Option<String>,
     },
 
-    /// Authenticate with Telegram
+    /// Authenticate with the cloud backend
     Auth {
         /// Phone number
         #[arg(long)]
@@ -307,7 +307,7 @@ fn cmd_init(
     api_hash: String,
     phone: Option<String>,
 ) -> Result<()> {
-    info!("Initializing TelegramFS...");
+    info!("Initializing tgcryptfs...");
 
     // Create default config
     let mut config = Config::default();
@@ -344,8 +344,8 @@ fn cmd_init(
     info!("Data directory: {:?}", config.data_dir);
     info!("");
     info!("Next steps:");
-    info!("  1. Run 'telegramfs auth --phone <your_phone>' to authenticate");
-    info!("  2. Run 'telegramfs mount <mount_point>' to mount the filesystem");
+    info!("  1. Run 'tgcryptfs auth --phone <your_phone>' to authenticate");
+    info!("  2. Run 'tgcryptfs mount <mount_point>' to mount the filesystem");
 
     Ok(())
 }
@@ -353,7 +353,7 @@ fn cmd_init(
 fn cmd_auth(config_path: &PathBuf, phone: &str, code_opt: Option<String>, password_opt: Option<String>) -> Result<()> {
     let config = Config::load(config_path)?;
 
-    info!("Authenticating with Telegram...");
+    info!("Authenticating with cloud backend...");
 
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Internal(e.to_string()))?;
 
@@ -417,7 +417,7 @@ fn cmd_mount(
     config.mount.mount_point = mount_point.clone();
     config.mount.allow_other = allow_other;
 
-    info!("Starting TelegramFS...");
+    info!("Starting tgcryptfs...");
 
     // Get password for key derivation
     let password = if let Some(path) = password_file {
@@ -461,7 +461,7 @@ fn cmd_mount(
     let cache = ChunkCache::new(&config.cache)?;
 
     // Create filesystem
-    let fs = TelegramFs::new(config.clone(), key_manager, metadata, telegram, cache)?;
+    let fs = TgCryptFs::new(config.clone(), key_manager, metadata, telegram, cache)?;
 
     // Ensure mount point exists
     std::fs::create_dir_all(mount_point)?;
@@ -470,7 +470,7 @@ fn cmd_mount(
 
     // Build mount options
     let mut options = vec![
-        fuser::MountOption::FSName("telegramfs".to_string()),
+        fuser::MountOption::FSName("tgcryptfs".to_string()),
         fuser::MountOption::AutoUnmount,
     ];
 
@@ -483,7 +483,7 @@ fn cmd_mount(
         fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
     } else {
         // Daemonize
-        info!("Daemonizing... Use 'telegramfs unmount {:?}' to unmount", mount_point);
+        info!("Daemonizing... Use 'tgcryptfs unmount {:?}' to unmount", mount_point);
 
         // For proper daemonization, you'd use a crate like `daemonize`
         // For now, just run in foreground
@@ -522,7 +522,7 @@ fn cmd_unmount(mount_point: &PathBuf) -> Result<()> {
 fn cmd_status(config_path: &PathBuf) -> Result<()> {
     let config = Config::load(config_path)?;
 
-    println!("TelegramFS Status");
+    println!("tgcryptfs Status");
     println!("=================");
     println!();
     println!("Configuration: {:?}", config_path);
@@ -534,21 +534,21 @@ fn cmd_status(config_path: &PathBuf) -> Result<()> {
     println!("Deduplication: {}", if config.chunk.dedup_enabled { "enabled" } else { "disabled" });
     println!("Versioning: {}", if config.versioning.enabled { "enabled" } else { "disabled" });
 
-    // Check Telegram connection
+    // Check cloud backend connection
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Internal(e.to_string()))?;
     runtime.block_on(async {
         let backend = TelegramBackend::new(config.telegram.clone());
         match backend.connect().await {
             Ok(_) => {
                 if backend.is_authorized().await.unwrap_or(false) {
-                    println!("Telegram: connected and authorized");
+                    println!("Cloud backend: connected and authorized");
                 } else {
-                    println!("Telegram: connected but NOT authorized (run 'telegramfs auth')");
+                    println!("Cloud backend: connected but NOT authorized (run 'tgcryptfs auth')");
                 }
                 backend.disconnect().await;
             }
             Err(e) => {
-                println!("Telegram: connection failed - {}", e);
+                println!("Cloud backend: connection failed - {}", e);
             }
         }
         Ok::<_, Error>(())
@@ -608,7 +608,7 @@ fn cmd_cache(config_path: &PathBuf, clear: bool) -> Result<()> {
 }
 
 fn cmd_sync(_config_path: &PathBuf, full: bool) -> Result<()> {
-    info!("Syncing with Telegram...");
+    info!("Syncing with cloud backend...");
 
     if full {
         info!("Performing full sync...");
@@ -619,7 +619,7 @@ fn cmd_sync(_config_path: &PathBuf, full: bool) -> Result<()> {
 }
 
 fn cmd_machine_init(config_path: &PathBuf, name: Option<String>) -> Result<()> {
-    use telegramfs::config::ConfigV2;
+    use tgcryptfs::config::ConfigV2;
     use uuid::Uuid;
 
     info!("Initializing machine identity...");
@@ -657,7 +657,7 @@ fn cmd_machine_init(config_path: &PathBuf, name: Option<String>) -> Result<()> {
 }
 
 fn cmd_machine_show(config_path: &PathBuf) -> Result<()> {
-    use telegramfs::config::ConfigV2;
+    use tgcryptfs::config::ConfigV2;
 
     let config = ConfigV2::load(config_path)?;
 
@@ -682,7 +682,7 @@ fn cmd_namespace_create(
     master: Option<String>,
     cluster: Option<String>,
 ) -> Result<()> {
-    use telegramfs::config::{ConfigV2, NamespaceConfig, NamespaceType};
+    use tgcryptfs::config::{ConfigV2, NamespaceConfig, NamespaceType};
 
     info!("Creating namespace '{}'...", name);
 
@@ -742,7 +742,7 @@ fn cmd_namespace_create(
 }
 
 fn cmd_namespace_list(config_path: &PathBuf) -> Result<()> {
-    use telegramfs::config::ConfigV2;
+    use tgcryptfs::config::ConfigV2;
 
     let config = ConfigV2::load(config_path)?;
 
@@ -773,7 +773,7 @@ fn cmd_namespace_list(config_path: &PathBuf) -> Result<()> {
 }
 
 fn cmd_cluster_create(config_path: &PathBuf, cluster_id: String) -> Result<()> {
-    use telegramfs::config::{ConfigV2, DistributedConfig, DistributionMode, ConflictResolution};
+    use tgcryptfs::config::{ConfigV2, DistributedConfig, DistributionMode, ConflictResolution};
 
     info!("Creating cluster '{}'...", cluster_id);
 
@@ -798,7 +798,7 @@ fn cmd_cluster_create(config_path: &PathBuf, cluster_id: String) -> Result<()> {
 }
 
 fn cmd_cluster_join(config_path: &PathBuf, cluster_id: String, role: String) -> Result<()> {
-    use telegramfs::config::{
+    use tgcryptfs::config::{
         ConfigV2, DistributedConfig, DistributionMode, MasterReplicaConfig, ReplicaRole,
         ConflictResolution,
     };
@@ -857,7 +857,7 @@ fn cmd_cluster_join(config_path: &PathBuf, cluster_id: String, role: String) -> 
 }
 
 fn cmd_cluster_status(config_path: &PathBuf) -> Result<()> {
-    use telegramfs::config::ConfigV2;
+    use tgcryptfs::config::ConfigV2;
 
     let config = ConfigV2::load(config_path)?;
 

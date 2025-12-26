@@ -1,4 +1,4 @@
-//! Error types for TelegramFS
+//! Error types for tgcryptfs
 
 use std::io;
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 /// Result type alias using our Error type
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Main error type for TelegramFS
+/// Main error type for tgcryptfs
 #[derive(Error, Debug)]
 pub enum Error {
     // Crypto errors

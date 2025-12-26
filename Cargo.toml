@@ -1,12 +1,12 @@
 [package]
-name = "telegramfs"
+name = "tgcryptfs"
 version = "0.1.0"
 edition = "2021"
-authors = ["TelegramFS Contributors"]
-description = "Encrypted filesystem backed by Telegram Saved Messages"
+authors = ["tgcryptfs Contributors"]
+description = "Encrypted cloud-backed filesystem using FUSE"
 license = "MIT"
-repository = "https://github.com/damienheiser/telegramfs"
-keywords = ["filesystem", "fuse", "telegram", "encryption", "backup"]
+repository = "https://github.com/damienheiser/tgcryptfs"
+keywords = ["filesystem", "fuse", "encryption", "backup", "cloud"]
 categories = ["filesystem", "cryptography"]
 
 [dependencies]

@@ -22,8 +22,8 @@ use tracing::{debug, error};
 /// TTL for cached attributes
 const TTL: Duration = Duration::from_secs(1);
 
-/// Main TelegramFS filesystem
-pub struct TelegramFs {
+/// Main tgcryptfs filesystem
+pub struct TgCryptFs {
     /// Configuration
     config: Arc<Config>,
     /// Key manager
@@ -46,8 +46,8 @@ pub struct TelegramFs {
     gid: u32,
 }
 
-impl TelegramFs {
-    /// Create a new TelegramFS instance
+impl TgCryptFs {
+    /// Create a new tgcryptfs instance
     pub fn new(
         config: Config,
         keys: KeyManager,
@@ -59,7 +59,7 @@ impl TelegramFs {
 
         let chunker = Chunker::new(&config.chunk);
 
-        Ok(TelegramFs {
+        Ok(TgCryptFs {
             config: Arc::new(config),
             keys: Arc::new(keys),
             metadata: Arc::new(metadata),
@@ -316,7 +316,7 @@ impl TelegramFs {
     }
 }
 
-impl Filesystem for TelegramFs {
+impl Filesystem for TgCryptFs {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name = match name.to_str() {
             Some(n) => n,

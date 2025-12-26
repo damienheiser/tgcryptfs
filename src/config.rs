@@ -1,11 +1,11 @@
-//! Configuration management for TelegramFS
+//! Configuration management for tgcryptfs
 
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// Default chunk size: 50MB (safe margin under Telegram's 2GB limit)
+/// Default chunk size: 50MB (safe margin under cloud storage limit)
 pub const DEFAULT_CHUNK_SIZE: usize = 50 * 1024 * 1024;
 
 /// Default cache size: 1GB
@@ -438,7 +438,7 @@ impl Default for Config {
     fn default() -> Self {
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("telegramfs");
+            .join("tgcryptfs");
 
         Config {
             telegram: TelegramConfig::default(),
@@ -464,7 +464,7 @@ impl Default for TelegramConfig {
             api_id: 0,
             api_hash: String::new(),
             phone: None,
-            session_file: PathBuf::from("telegramfs.session"),
+            session_file: PathBuf::from("tgcryptfs.session"),
             max_concurrent_uploads: 3,
             max_concurrent_downloads: 5,
             retry_attempts: 3,
@@ -498,7 +498,7 @@ impl Default for ChunkConfig {
 impl Default for MountConfig {
     fn default() -> Self {
         MountConfig {
-            mount_point: PathBuf::from("/mnt/telegramfs"),
+            mount_point: PathBuf::from("/mnt/tgcryptfs"),
             allow_other: false,
             allow_root: false,
             default_file_mode: 0o644,
@@ -654,7 +654,7 @@ impl Default for MachineConfig {
             name: hostname::get()
                 .ok()
                 .and_then(|h| h.into_string().ok())
-                .unwrap_or_else(|| "telegramfs-machine".to_string()),
+                .unwrap_or_else(|| "tgcryptfs-machine".to_string()),
         }
     }
 }
@@ -674,7 +674,7 @@ impl Default for ConfigV2 {
     fn default() -> Self {
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("telegramfs");
+            .join("tgcryptfs");
 
         ConfigV2 {
             version: 2,
@@ -726,7 +726,7 @@ impl ConfigV2 {
         if config.data_dir == PathBuf::new() {
             config.data_dir = dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("telegramfs");
+                .join("tgcryptfs");
         }
 
         // Generate machine ID if set to "auto"

@@ -1,7 +1,7 @@
-//! TelegramFS - Encrypted filesystem backed by Telegram Saved Messages
+//! tgcryptfs - Encrypted cloud-backed filesystem
 //!
 //! This library provides a FUSE-based filesystem that stores all data
-//! encrypted in Telegram's Saved Messages, with local caching for performance.
+//! encrypted in the cloud, with local caching for performance.
 
 pub mod cache;
 pub mod chunk;
