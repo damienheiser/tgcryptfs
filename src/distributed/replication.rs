@@ -155,7 +155,8 @@ pub struct SnapshotManager {
     /// Current version number
     current_version: Arc<RwLock<u64>>,
 
-    /// Maximum snapshots to retain
+    /// Maximum snapshots to retain (TODO: implement retention policy)
+    #[allow(dead_code)]
     max_snapshots: usize,
 }
 

@@ -181,7 +181,6 @@ impl SnapshotManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::{FileType, InodeAttributes};
     use rand::RngCore;
 
     fn test_key() -> [u8; KEY_SIZE] {
