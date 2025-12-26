@@ -121,6 +121,9 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 

@@ -354,7 +354,7 @@ fn cmd_auth(config_path: &PathBuf, phone: &str) -> Result<()> {
         }
 
         // Request code
-        backend.request_login_code(phone).await?;
+        let login_token = backend.request_login_code(phone).await?;
         info!("Login code sent to {}", phone);
 
         // Get code from user
@@ -367,7 +367,17 @@ fn cmd_auth(config_path: &PathBuf, phone: &str) -> Result<()> {
         let code = code.trim();
 
         // Sign in
-        backend.sign_in(phone, code).await?;
+        match backend.sign_in(&login_token, code).await? {
+            Some(password_token) => {
+                // 2FA required
+                let hint = password_token.hint().unwrap_or("none");
+                println!("2FA required (hint: {})", hint);
+                let password = rpassword::prompt_password("Enter your 2FA password: ")
+                    .map_err(|e| Error::Internal(e.to_string()))?;
+                backend.check_password(password_token, &password).await?;
+            }
+            None => {}
+        }
         info!("Successfully authenticated!");
 
         backend.disconnect().await;

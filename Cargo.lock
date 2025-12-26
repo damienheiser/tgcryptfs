@@ -1881,6 +1881,7 @@ dependencies = [
  "dirs",
  "fuser",
  "grammers-client",
+ "grammers-mtsender",
  "grammers-session",
  "grammers-tl-types",
  "hex",

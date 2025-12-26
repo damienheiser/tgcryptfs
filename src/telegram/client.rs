@@ -8,14 +8,16 @@ use crate::error::{Error, Result};
 use crate::telegram::rate_limit::{ExponentialBackoff, RateLimiter};
 use crate::telegram::{CHUNK_FILE_PREFIX, METADATA_FILE_PREFIX};
 
-use grammers_client::Client;
-#[allow(unused_imports)]
-use grammers_session::Session;
-#[allow(unused_imports)]
-use grammers_tl_types as tl;
+use grammers_client::{Client, InputMessage, SignInError};
+use grammers_mtsender::{SenderPool, SenderPoolHandle};
+use grammers_session::storages::SqliteSession;
+use grammers_session::defs::PeerRef;
 
+use std::io::{BufRead, Cursor, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 /// Represents a message stored in Telegram
@@ -31,11 +33,30 @@ pub struct TelegramMessage {
     pub date: i64,
 }
 
+/// Login token for completing sign-in
+pub struct LoginToken {
+    inner: grammers_client::types::LoginToken,
+}
+
+/// Password token for 2FA
+pub struct PasswordToken {
+    inner: grammers_client::types::PasswordToken,
+}
+
+impl PasswordToken {
+    /// Get the password hint
+    pub fn hint(&self) -> Option<&str> {
+        self.inner.hint()
+    }
+}
+
 /// Internal client state
-#[allow(dead_code)]
 struct ClientState {
     client: Client,
-    user_id: i64,
+    #[allow(dead_code)]
+    session: Arc<SqliteSession>,
+    pool_handle: SenderPoolHandle,
+    _pool_task: JoinHandle<()>,
 }
 
 /// Telegram backend for storing and retrieving chunks
@@ -74,7 +95,6 @@ impl TelegramBackend {
 
     /// Check if connected
     pub fn is_connected(&self) -> bool {
-        // Use try_read to avoid blocking
         if let Ok(guard) = self.client_state.try_read() {
             guard.is_some()
         } else {
@@ -82,47 +102,148 @@ impl TelegramBackend {
         }
     }
 
+    /// Get the session file path
+    fn session_path(&self) -> PathBuf {
+        let path = &self.config.session_file;
+        if path.extension().is_none() {
+            path.with_extension("session")
+        } else {
+            path.clone()
+        }
+    }
+
     /// Connect to Telegram
     pub async fn connect(&self) -> Result<()> {
-        // TODO: Implement with grammers 0.8 API
-        // The grammers 0.8 API changed significantly from 0.6
-        // This needs to be updated to use the new API
-        error!("Telegram connect not yet implemented for grammers 0.8");
-        Err(Error::TelegramClient(
-            "Telegram integration not yet updated for grammers 0.8".to_string()
-        ))
+        let session_path = self.session_path();
+
+        // Ensure parent directory exists
+        if let Some(parent) = session_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                Error::Configuration(format!("Failed to create session directory: {}", e))
+            })?;
+        }
+
+        let session = Arc::new(
+            SqliteSession::open(&session_path).map_err(|e| {
+                Error::TelegramClient(format!("Failed to open session: {}", e))
+            })?
+        );
+
+        let pool = SenderPool::new(Arc::clone(&session), self.config.api_id);
+        let client = Client::new(&pool);
+        let SenderPool { runner, handle, .. } = pool;
+
+        let pool_task = tokio::spawn(runner.run());
+
+        let state = ClientState {
+            client,
+            session,
+            pool_handle: handle,
+            _pool_task: pool_task,
+        };
+
+        *self.client_state.write().await = Some(state);
+        info!("Connected to Telegram");
+        Ok(())
     }
 
     /// Check if authorized
     pub async fn is_authorized(&self) -> Result<bool> {
-        // TODO: Implement with grammers 0.8 API
-        Ok(false)
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        client_state.client.is_authorized().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to check authorization: {}", e))
+        })
     }
 
     /// Request login code
-    pub async fn request_login_code(&self, _phone: &str) -> Result<()> {
-        // TODO: Implement with grammers 0.8 API
-        Err(Error::TelegramClient(
-            "Not yet implemented for grammers 0.8".to_string()
-        ))
+    pub async fn request_login_code(&self, phone: &str) -> Result<LoginToken> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        let token = client_state.client
+            .request_login_code(phone, &self.config.api_hash)
+            .await
+            .map_err(|e| Error::TelegramClient(format!("Failed to request login code: {}", e)))?;
+
+        Ok(LoginToken { inner: token })
     }
 
     /// Sign in with code
-    pub async fn sign_in(&self, _phone: &str, _code: &str) -> Result<()> {
-        // TODO: Implement with grammers 0.8 API
-        Err(Error::TelegramClient(
-            "Not yet implemented for grammers 0.8".to_string()
-        ))
+    pub async fn sign_in(&self, token: &LoginToken, code: &str) -> Result<Option<PasswordToken>> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        match client_state.client.sign_in(&token.inner, code).await {
+            Ok(_) => {
+                info!("Successfully signed in");
+                Ok(None)
+            }
+            Err(SignInError::PasswordRequired(password_token)) => {
+                Ok(Some(PasswordToken { inner: password_token }))
+            }
+            Err(e) => Err(Error::TelegramClient(format!("Sign in failed: {}", e))),
+        }
+    }
+
+    /// Check password for 2FA
+    pub async fn check_password(&self, token: PasswordToken, password: &str) -> Result<()> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        client_state.client
+            .check_password(token.inner, password)
+            .await
+            .map_err(|e| Error::TelegramClient(format!("Password check failed: {}", e)))?;
+
+        info!("Successfully authenticated with 2FA");
+        Ok(())
+    }
+
+    /// Bot sign in
+    pub async fn bot_sign_in(&self, token: &str) -> Result<()> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        client_state.client
+            .bot_sign_in(token, &self.config.api_hash)
+            .await
+            .map_err(|e| Error::TelegramClient(format!("Bot sign in failed: {}", e)))?;
+
+        info!("Successfully signed in as bot");
+        Ok(())
+    }
+
+    /// Get PeerRef for "Saved Messages" (self)
+    #[allow(dead_code)]
+    async fn get_self_peer(&self) -> Result<PeerRef> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        let me = client_state.client.get_me().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to get self: {}", e))
+        })?;
+
+        // Convert to PeerRef via the raw tl type
+        Ok(PeerRef::from(me.raw))
     }
 
     /// Upload a chunk to Saved Messages
     pub async fn upload_chunk(&self, chunk_id: &str, data: &[u8]) -> Result<i32> {
         let _permit = self.upload_limiter.acquire().await;
-
-        let state = self.client_state.read().await;
-        let _client_state = state.as_ref().ok_or_else(|| {
-            Error::TelegramClient("Not connected".to_string())
-        })?;
 
         let filename = format!("{}{}", CHUNK_FILE_PREFIX, chunk_id);
         debug!("Uploading chunk: {} ({} bytes)", filename, data.len());
@@ -152,20 +273,38 @@ impl TelegramBackend {
     }
 
     /// Internal upload implementation
-    async fn do_upload(&self, _filename: &str, _data: &[u8]) -> Result<i32> {
-        // TODO: Implement with grammers 0.8 API
-        Err(Error::TelegramUpload(
-            "Not yet implemented for grammers 0.8".to_string()
-        ))
+    async fn do_upload(&self, filename: &str, data: &[u8]) -> Result<i32> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        let me = client_state.client.get_me().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to get self: {}", e))
+        })?;
+        let peer = PeerRef::from(me.raw);
+
+        // Upload file from memory using upload_stream
+        let mut cursor = Cursor::new(data);
+        let uploaded = client_state.client
+            .upload_stream(&mut cursor, data.len(), filename.to_string())
+            .await
+            .map_err(|e| Error::TelegramUpload(format!("Failed to upload file: {}", e)))?;
+
+        let message = InputMessage::new()
+            .document(uploaded);
+
+        let sent = client_state.client
+            .send_message(peer, message)
+            .await
+            .map_err(|e| Error::TelegramUpload(format!("Failed to send message: {}", e)))?;
+
+        Ok(sent.id())
     }
 
     /// Download a chunk by message ID
     pub async fn download_chunk(&self, message_id: i32) -> Result<Vec<u8>> {
         let _permit = self.download_limiter.acquire().await;
-
-        if !self.is_connected() {
-            return Err(Error::TelegramClient("Not connected".to_string()));
-        }
 
         debug!("Downloading chunk from message {}", message_id);
 
@@ -194,52 +333,136 @@ impl TelegramBackend {
     }
 
     /// Internal download implementation
-    async fn do_download(&self, _message_id: i32) -> Result<Vec<u8>> {
-        // TODO: Implement with grammers
-        // 1. Get "Saved Messages": client.get_me()
-        // 2. Get message: client.get_messages_by_id(&me, &[message_id])
-        // 3. Get media from message
-        // 4. Download: client.iter_download(&media)
+    async fn do_download(&self, message_id: i32) -> Result<Vec<u8>> {
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
 
-        Err(Error::NotImplemented(
-            "Telegram download not yet implemented".to_string()
-        ))
+        let me = client_state.client.get_me().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to get self: {}", e))
+        })?;
+        let peer = PeerRef::from(me.raw);
+
+        // Get the message
+        let messages = client_state.client
+            .get_messages_by_id(peer, &[message_id])
+            .await
+            .map_err(|e| Error::TelegramDownload(format!("Failed to get message: {}", e)))?;
+
+        let message = messages.into_iter().next().flatten().ok_or_else(|| {
+            Error::TelegramDownload(format!("Message {} not found", message_id))
+        })?;
+
+        let media = message.media().ok_or_else(|| {
+            Error::TelegramDownload(format!("Message {} has no media", message_id))
+        })?;
+
+        // Download to memory
+        let mut data = Vec::new();
+        let mut download = client_state.client.iter_download(&media);
+
+        while let Some(chunk) = download.next().await.map_err(|e| {
+            Error::TelegramDownload(format!("Failed to download chunk: {}", e))
+        })? {
+            data.extend_from_slice(&chunk);
+        }
+
+        Ok(data)
     }
 
     /// Delete a message by ID
     pub async fn delete_message(&self, message_id: i32) -> Result<()> {
-        if !self.is_connected() {
-            return Err(Error::TelegramClient("Not connected".to_string()));
-        }
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
 
-        // TODO: Implement with grammers
-        // client.delete_messages(&me, &[message_id])
+        let me = client_state.client.get_me().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to get self: {}", e))
+        })?;
+        let peer = PeerRef::from(me.raw);
 
-        debug!("Would delete message {}", message_id);
+        client_state.client
+            .delete_messages(peer, &[message_id])
+            .await
+            .map_err(|e| Error::TelegramClient(format!("Failed to delete message: {}", e)))?;
+
+        debug!("Deleted message {}", message_id);
         Ok(())
     }
 
     /// List all chunk messages in Saved Messages
     pub async fn list_chunks(&self) -> Result<Vec<TelegramMessage>> {
-        if !self.is_connected() {
-            return Err(Error::TelegramClient("Not connected".to_string()));
+        let state = self.client_state.read().await;
+        let client_state = state.as_ref().ok_or_else(|| {
+            Error::TelegramClient("Not connected".to_string())
+        })?;
+
+        let me = client_state.client.get_me().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to get self: {}", e))
+        })?;
+        let peer = PeerRef::from(me.raw);
+
+        let mut messages = Vec::new();
+        let mut iter = client_state.client.iter_messages(peer);
+
+        while let Some(msg) = iter.next().await.map_err(|e| {
+            Error::TelegramClient(format!("Failed to iterate messages: {}", e))
+        })? {
+            if let Some(media) = msg.media() {
+                // Check if it's a document with our prefix
+                if let grammers_client::types::Media::Document(doc) = media {
+                    let name = doc.name();
+                    if name.starts_with(CHUNK_FILE_PREFIX) || name.starts_with(METADATA_FILE_PREFIX) {
+                        messages.push(TelegramMessage {
+                            id: msg.id(),
+                            filename: Some(name.to_string()),
+                            size: doc.size() as u64,
+                            date: msg.date().timestamp(),
+                        });
+                    }
+                }
+            }
         }
 
-        // TODO: Implement with grammers
-        // Iterate through messages and filter by filename prefix
-
-        Ok(Vec::new())
+        Ok(messages)
     }
 
     /// Upload metadata to Saved Messages
     pub async fn upload_metadata(&self, name: &str, data: &[u8]) -> Result<i32> {
         let filename = format!("{}{}", METADATA_FILE_PREFIX, name);
-        self.upload_chunk(&filename, data).await
+        self.do_upload(&filename, data).await
     }
 
     /// Disconnect from Telegram
     pub async fn disconnect(&self) {
-        // TODO: Save session before disconnecting and clean up client state
-        info!("Disconnected from Telegram");
+        let mut state = self.client_state.write().await;
+        if let Some(client_state) = state.take() {
+            client_state.pool_handle.quit();
+            info!("Disconnected from Telegram");
+        }
     }
+}
+
+/// Prompt for input (used during interactive auth)
+#[allow(dead_code)]
+pub fn prompt(message: &str) -> std::io::Result<String> {
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    stdout.write_all(message.as_bytes())?;
+    stdout.flush()?;
+
+    let stdin = std::io::stdin();
+    let mut stdin = stdin.lock();
+
+    let mut line = String::new();
+    stdin.read_line(&mut line)?;
+    Ok(line.trim().to_string())
+}
+
+/// Prompt for password (hides input)
+#[allow(dead_code)]
+pub fn prompt_password(message: &str) -> std::io::Result<String> {
+    rpassword::prompt_password(message)
 }
