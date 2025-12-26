@@ -61,6 +61,14 @@ enum Commands {
         /// Phone number
         #[arg(long)]
         phone: String,
+
+        /// Login code (if not provided, will prompt interactively)
+        #[arg(long)]
+        code: Option<String>,
+
+        /// 2FA password (if required)
+        #[arg(long)]
+        password: Option<String>,
     },
 
     /// Mount the filesystem
@@ -230,7 +238,7 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
             phone,
         } => cmd_init(config_path, api_id, api_hash, phone),
 
-        Commands::Auth { phone } => cmd_auth(config_path, &phone),
+        Commands::Auth { phone, code, password } => cmd_auth(config_path, &phone, code, password),
 
         Commands::Mount {
             mount_point,
@@ -337,7 +345,7 @@ fn cmd_init(
     Ok(())
 }
 
-fn cmd_auth(config_path: &PathBuf, phone: &str) -> Result<()> {
+fn cmd_auth(config_path: &PathBuf, phone: &str, code_opt: Option<String>, password_opt: Option<String>) -> Result<()> {
     let config = Config::load(config_path)?;
 
     info!("Authenticating with Telegram...");
@@ -357,23 +365,31 @@ fn cmd_auth(config_path: &PathBuf, phone: &str) -> Result<()> {
         let login_token = backend.request_login_code(phone).await?;
         info!("Login code sent to {}", phone);
 
-        // Get code from user
-        print!("Enter the code you received: ");
-        use std::io::Write;
-        std::io::stdout().flush()?;
+        // Get code from user (or use provided code)
+        let code = if let Some(c) = code_opt {
+            c
+        } else {
+            print!("Enter the code you received: ");
+            use std::io::Write;
+            std::io::stdout().flush()?;
 
-        let mut code = String::new();
-        std::io::stdin().read_line(&mut code)?;
-        let code = code.trim();
+            let mut code = String::new();
+            std::io::stdin().read_line(&mut code)?;
+            code.trim().to_string()
+        };
 
         // Sign in
-        match backend.sign_in(&login_token, code).await? {
+        match backend.sign_in(&login_token, &code).await? {
             Some(password_token) => {
                 // 2FA required
                 let hint = password_token.hint().unwrap_or("none");
                 println!("2FA required (hint: {})", hint);
-                let password = rpassword::prompt_password("Enter your 2FA password: ")
-                    .map_err(|e| Error::Internal(e.to_string()))?;
+                let password = if let Some(p) = password_opt {
+                    p
+                } else {
+                    rpassword::prompt_password("Enter your 2FA password: ")
+                        .map_err(|e| Error::Internal(e.to_string()))?
+                };
                 backend.check_password(password_token, &password).await?;
             }
             None => {}
