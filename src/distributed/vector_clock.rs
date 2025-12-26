@@ -424,8 +424,9 @@ mod tests {
         vc_a_snapshot.set(machine_a, 1);
         assert!(vc_a_snapshot.happened_before(&vc_c));
 
-        // And C's operation is concurrent with B's
-        assert!(vc_b.concurrent(&vc_c));
+        // B's original operation happened before C's operation
+        // (C received B's state via A's merge, so C knows about B:1)
+        assert!(vc_b.happened_before(&vc_c));
     }
 
     #[test]

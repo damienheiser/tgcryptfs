@@ -298,7 +298,8 @@ impl MetadataStore {
                 let ino = u64::from_be_bytes(ino_bytes[..8].try_into().unwrap());
                 if let Some(inode) = self.get_inode(ino)? {
                     // Make sure it's actually a child (not just prefix match)
-                    if inode.parent == parent {
+                    // Also exclude the parent itself (root inode is its own parent)
+                    if inode.parent == parent && inode.ino != parent {
                         children.push(inode);
                     }
                 }

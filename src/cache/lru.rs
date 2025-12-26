@@ -2,13 +2,13 @@
 
 use std::collections::{HashMap, VecDeque};
 
-/// Simple LRU tracker
+/// Simple LRU tracker using lazy cleanup
 pub struct LruCache<K: Clone + Eq + std::hash::Hash> {
-    /// Order of access (front = oldest)
-    order: VecDeque<K>,
-    /// Position lookup for O(1) removal
+    /// Order of access with generation (front = oldest). Entry is (key, generation at insertion)
+    order: VecDeque<(K, usize)>,
+    /// Position lookup: key -> current generation
     positions: HashMap<K, usize>,
-    /// Generation counter for lazy cleanup
+    /// Generation counter for tracking freshness
     generation: usize,
 }
 
@@ -26,7 +26,7 @@ impl<K: Clone + Eq + std::hash::Hash> LruCache<K> {
     pub fn insert(&mut self, key: K) {
         self.generation += 1;
         self.positions.insert(key.clone(), self.generation);
-        self.order.push_back(key);
+        self.order.push_back((key, self.generation));
     }
 
     /// Touch an item (mark as recently used)
@@ -34,30 +34,29 @@ impl<K: Clone + Eq + std::hash::Hash> LruCache<K> {
         if self.positions.contains_key(key) {
             self.generation += 1;
             self.positions.insert(key.clone(), self.generation);
-            self.order.push_back(key.clone());
+            self.order.push_back((key.clone(), self.generation));
         }
     }
 
     /// Remove an item
     pub fn remove(&mut self, key: &K) {
         self.positions.remove(key);
-        // Lazy removal - will be skipped when popping
+        // Lazy removal - stale entries will be skipped when popping
     }
 
     /// Pop the oldest item
     pub fn pop_oldest(&mut self) -> Option<K> {
-        while let Some(key) = self.order.pop_front() {
-            // Check if this entry is still valid (not updated since)
-            if let Some(&gen) = self.positions.get(&key) {
-                // Check if there's a newer entry for this key
-                let is_newest = self.order.iter().all(|k| {
-                    k != &key || self.positions.get(k).map(|&g| g <= gen).unwrap_or(true)
-                });
-
-                if is_newest && self.positions.remove(&key).is_some() {
+        while let Some((key, entry_gen)) = self.order.pop_front() {
+            // Check if this entry is still valid (generation matches current)
+            if let Some(&current_gen) = self.positions.get(&key) {
+                if entry_gen == current_gen {
+                    // This is the current entry for this key
+                    self.positions.remove(&key);
                     return Some(key);
                 }
+                // Stale entry - key was touched/reinserted, skip it
             }
+            // Entry was removed or superseded, continue to next
         }
         None
     }
@@ -86,8 +85,8 @@ impl<K: Clone + Eq + std::hash::Hash> LruCache<K> {
         items.sort_by_key(|(_, g)| *g);
 
         self.order.clear();
-        for (key, _) in items {
-            self.order.push_back(key);
+        for (key, gen) in items {
+            self.order.push_back((key, gen));
         }
     }
 }

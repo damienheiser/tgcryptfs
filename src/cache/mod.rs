@@ -275,6 +275,7 @@ impl CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn test_config(dir: &Path) -> CacheConfig {
