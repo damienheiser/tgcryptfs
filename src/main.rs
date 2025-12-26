@@ -118,6 +118,81 @@ enum Commands {
         #[arg(long)]
         full: bool,
     },
+
+    /// Machine management
+    #[command(subcommand)]
+    Machine(MachineCommands),
+
+    /// Namespace management
+    #[command(subcommand)]
+    Namespace(NamespaceCommands),
+
+    /// Cluster management
+    #[command(subcommand)]
+    Cluster(ClusterCommands),
+}
+
+#[derive(Subcommand)]
+enum MachineCommands {
+    /// Initialize machine identity
+    Init {
+        /// Machine name
+        #[arg(long)]
+        name: Option<String>,
+    },
+
+    /// Show machine identity
+    Show,
+}
+
+#[derive(Subcommand)]
+enum NamespaceCommands {
+    /// Create a new namespace
+    Create {
+        /// Namespace name
+        name: String,
+
+        /// Namespace type
+        #[arg(long, value_parser = ["standalone", "master-replica", "distributed"])]
+        r#type: String,
+
+        /// Mount point for this namespace
+        #[arg(long)]
+        mount_point: Option<PathBuf>,
+
+        /// Master machine ID (for master-replica)
+        #[arg(long)]
+        master: Option<String>,
+
+        /// Cluster ID (for distributed)
+        #[arg(long)]
+        cluster: Option<String>,
+    },
+
+    /// List all namespaces
+    List,
+}
+
+#[derive(Subcommand)]
+enum ClusterCommands {
+    /// Create a new cluster
+    Create {
+        /// Cluster ID
+        cluster_id: String,
+    },
+
+    /// Join an existing cluster
+    Join {
+        /// Cluster ID to join
+        cluster_id: String,
+
+        /// Role in the cluster
+        #[arg(long, value_parser = ["master", "replica", "node"])]
+        role: String,
+    },
+
+    /// Show cluster status
+    Status,
 }
 
 fn main() {
@@ -176,6 +251,40 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
         Commands::Cache { clear } => cmd_cache(config_path, clear),
 
         Commands::Sync { full } => cmd_sync(config_path, full),
+
+        Commands::Machine(machine_cmd) => run_machine_command(machine_cmd, config_path),
+
+        Commands::Namespace(namespace_cmd) => run_namespace_command(namespace_cmd, config_path),
+
+        Commands::Cluster(cluster_cmd) => run_cluster_command(cluster_cmd, config_path),
+    }
+}
+
+fn run_machine_command(command: MachineCommands, config_path: &PathBuf) -> Result<()> {
+    match command {
+        MachineCommands::Init { name } => cmd_machine_init(config_path, name),
+        MachineCommands::Show => cmd_machine_show(config_path),
+    }
+}
+
+fn run_namespace_command(command: NamespaceCommands, config_path: &PathBuf) -> Result<()> {
+    match command {
+        NamespaceCommands::Create {
+            name,
+            r#type,
+            mount_point,
+            master,
+            cluster,
+        } => cmd_namespace_create(config_path, name, r#type, mount_point, master, cluster),
+        NamespaceCommands::List => cmd_namespace_list(config_path),
+    }
+}
+
+fn run_cluster_command(command: ClusterCommands, config_path: &PathBuf) -> Result<()> {
+    match command {
+        ClusterCommands::Create { cluster_id } => cmd_cluster_create(config_path, cluster_id),
+        ClusterCommands::Join { cluster_id, role } => cmd_cluster_join(config_path, cluster_id, role),
+        ClusterCommands::Status => cmd_cluster_status(config_path),
     }
 }
 
@@ -467,6 +576,288 @@ fn cmd_sync(_config_path: &PathBuf, full: bool) -> Result<()> {
     }
 
     println!("Sync not yet fully implemented");
+    Ok(())
+}
+
+fn cmd_machine_init(config_path: &PathBuf, name: Option<String>) -> Result<()> {
+    use telegramfs::config::ConfigV2;
+    use uuid::Uuid;
+
+    info!("Initializing machine identity...");
+
+    // Load or create config
+    let mut config = if config_path.exists() {
+        ConfigV2::load(config_path)?
+    } else {
+        ConfigV2::from_env()?
+    };
+
+    // Set machine name if provided
+    if let Some(name) = name {
+        config.machine.name = name;
+    }
+
+    // Generate machine ID if not already set
+    if config.machine.id == "auto" || config.machine.id.is_empty() {
+        config.machine.id = Uuid::new_v4().to_string();
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    config.save(config_path)?;
+
+    println!("Machine initialized:");
+    println!("  ID: {}", config.machine.id);
+    println!("  Name: {}", config.machine.name);
+    println!("  Config: {:?}", config_path);
+
+    Ok(())
+}
+
+fn cmd_machine_show(config_path: &PathBuf) -> Result<()> {
+    use telegramfs::config::ConfigV2;
+
+    let config = ConfigV2::load(config_path)?;
+
+    println!("Machine Identity");
+    println!("================");
+    println!("ID: {}", config.machine.id);
+    println!("Name: {}", config.machine.name);
+    println!();
+    println!("Distribution Mode: {:?}", config.distribution.mode);
+    if let Some(cluster_id) = &config.distribution.cluster_id {
+        println!("Cluster ID: {}", cluster_id);
+    }
+
+    Ok(())
+}
+
+fn cmd_namespace_create(
+    config_path: &PathBuf,
+    name: String,
+    ns_type: String,
+    mount_point: Option<PathBuf>,
+    master: Option<String>,
+    cluster: Option<String>,
+) -> Result<()> {
+    use telegramfs::config::{ConfigV2, NamespaceConfig, NamespaceType};
+
+    info!("Creating namespace '{}'...", name);
+
+    let mut config = ConfigV2::load(config_path)?;
+
+    // Check if namespace already exists
+    if config.namespaces.iter().any(|ns| ns.name == name) {
+        return Err(Error::InvalidConfig(format!(
+            "Namespace '{}' already exists",
+            name
+        )));
+    }
+
+    // Parse namespace type
+    let namespace_type = match ns_type.as_str() {
+        "standalone" => NamespaceType::Standalone,
+        "master-replica" => {
+            if master.is_none() {
+                return Err(Error::InvalidConfig(
+                    "Master-replica namespaces require --master".to_string(),
+                ));
+            }
+            NamespaceType::MasterReplica
+        }
+        "distributed" => {
+            if cluster.is_none() {
+                return Err(Error::InvalidConfig(
+                    "Distributed namespaces require --cluster".to_string(),
+                ));
+            }
+            NamespaceType::Distributed
+        }
+        _ => {
+            return Err(Error::InvalidConfig(format!(
+                "Invalid namespace type: {}",
+                ns_type
+            )))
+        }
+    };
+
+    let namespace = NamespaceConfig {
+        name: name.clone(),
+        namespace_type,
+        mount_point,
+        master,
+        cluster,
+        access: vec![],
+    };
+
+    config.namespaces.push(namespace);
+    config.save(config_path)?;
+
+    println!("Namespace '{}' created successfully", name);
+    println!("  Type: {}", ns_type);
+
+    Ok(())
+}
+
+fn cmd_namespace_list(config_path: &PathBuf) -> Result<()> {
+    use telegramfs::config::ConfigV2;
+
+    let config = ConfigV2::load(config_path)?;
+
+    println!("Namespaces");
+    println!("==========");
+
+    if config.namespaces.is_empty() {
+        println!("No namespaces configured");
+        return Ok(());
+    }
+
+    for ns in &config.namespaces {
+        println!();
+        println!("Name: {}", ns.name);
+        println!("  Type: {:?}", ns.namespace_type);
+        if let Some(mount) = &ns.mount_point {
+            println!("  Mount: {:?}", mount);
+        }
+        if let Some(master) = &ns.master {
+            println!("  Master: {}", master);
+        }
+        if let Some(cluster) = &ns.cluster {
+            println!("  Cluster: {}", cluster);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_cluster_create(config_path: &PathBuf, cluster_id: String) -> Result<()> {
+    use telegramfs::config::{ConfigV2, DistributedConfig, DistributionMode, ConflictResolution};
+
+    info!("Creating cluster '{}'...", cluster_id);
+
+    let mut config = ConfigV2::load(config_path)?;
+
+    // Update distribution config
+    config.distribution.mode = DistributionMode::Distributed;
+    config.distribution.cluster_id = Some(cluster_id.clone());
+    config.distribution.distributed = Some(DistributedConfig {
+        sync_interval_ms: 1000,
+        conflict_resolution: ConflictResolution::LastWriteWins,
+        operation_log_retention_hours: 168,
+    });
+
+    config.save(config_path)?;
+
+    println!("Cluster '{}' created successfully", cluster_id);
+    println!("  Mode: Distributed");
+    println!("  Machine ID: {}", config.machine.id);
+
+    Ok(())
+}
+
+fn cmd_cluster_join(config_path: &PathBuf, cluster_id: String, role: String) -> Result<()> {
+    use telegramfs::config::{
+        ConfigV2, DistributedConfig, DistributionMode, MasterReplicaConfig, ReplicaRole,
+        ConflictResolution,
+    };
+
+    info!("Joining cluster '{}'...", cluster_id);
+
+    let mut config = ConfigV2::load(config_path)?;
+
+    match role.as_str() {
+        "master" | "replica" => {
+            config.distribution.mode = DistributionMode::MasterReplica;
+            config.distribution.cluster_id = Some(cluster_id.clone());
+
+            let replica_role = if role == "master" {
+                ReplicaRole::Master
+            } else {
+                ReplicaRole::Replica
+            };
+
+            config.distribution.master_replica = Some(MasterReplicaConfig {
+                role: replica_role,
+                master_id: if role == "master" {
+                    config.machine.id.clone()
+                } else {
+                    String::new() // Must be set manually for replicas
+                },
+                sync_interval_secs: 60,
+                snapshot_retention: 10,
+            });
+
+            println!("Joined cluster '{}' as {}", cluster_id, role);
+            if role == "replica" {
+                println!("NOTE: You must set the master_id in the config file");
+            }
+        }
+        "node" => {
+            config.distribution.mode = DistributionMode::Distributed;
+            config.distribution.cluster_id = Some(cluster_id.clone());
+            config.distribution.distributed = Some(DistributedConfig {
+                sync_interval_ms: 1000,
+                conflict_resolution: ConflictResolution::LastWriteWins,
+                operation_log_retention_hours: 168,
+            });
+
+            println!("Joined cluster '{}' as distributed node", cluster_id);
+        }
+        _ => {
+            return Err(Error::InvalidConfig(format!("Invalid role: {}", role)));
+        }
+    }
+
+    config.save(config_path)?;
+    println!("  Machine ID: {}", config.machine.id);
+
+    Ok(())
+}
+
+fn cmd_cluster_status(config_path: &PathBuf) -> Result<()> {
+    use telegramfs::config::ConfigV2;
+
+    let config = ConfigV2::load(config_path)?;
+
+    println!("Cluster Status");
+    println!("==============");
+    println!();
+    println!("Machine: {} ({})", config.machine.name, config.machine.id);
+    println!("Mode: {:?}", config.distribution.mode);
+
+    if let Some(cluster_id) = &config.distribution.cluster_id {
+        println!("Cluster: {}", cluster_id);
+    } else {
+        println!("Cluster: None (standalone mode)");
+        return Ok(());
+    }
+
+    if let Some(mr_config) = &config.distribution.master_replica {
+        println!();
+        println!("Master-Replica Configuration:");
+        println!("  Role: {:?}", mr_config.role);
+        println!("  Master ID: {}", mr_config.master_id);
+        println!("  Sync Interval: {}s", mr_config.sync_interval_secs);
+        println!("  Snapshot Retention: {}", mr_config.snapshot_retention);
+    }
+
+    if let Some(dist_config) = &config.distribution.distributed {
+        println!();
+        println!("Distributed Configuration:");
+        println!("  Sync Interval: {}ms", dist_config.sync_interval_ms);
+        println!(
+            "  Conflict Resolution: {:?}",
+            dist_config.conflict_resolution
+        );
+        println!(
+            "  Op Log Retention: {}h",
+            dist_config.operation_log_retention_hours
+        );
+    }
+
     Ok(())
 }
 
