@@ -14,10 +14,11 @@ pub mod sync;
 pub mod namespace;
 pub mod types;
 
-// TODO: These modules have compilation errors and need to be fixed
-// pub mod crdt;
+pub mod crdt;
+pub mod vector_clock;
+
+// TODO: This module has compilation errors and needs to be fixed
 // pub mod identity;
-// pub mod vector_clock;
 
 // Re-export master-replica types
 pub use replication::{
@@ -31,10 +32,12 @@ pub use namespace::{
 };
 pub use types::{AccessRule, AccessSubject, NamespaceType, Permissions};
 
-// TODO: Re-enable when fixed
-// pub use crdt::{
-//     Conflict, ConflictDetector, ConflictResolutionStrategy, ConflictResolver, ConflictType,
-//     CrdtOperation, CrdtSync, OperationLog, ResolutionResult,
-// };
+// Re-export CRDT types
+pub use crdt::{
+    Conflict, ConflictDetector, ConflictResolutionStrategy, ConflictResolver, ConflictType,
+    CrdtOperation, CrdtSync, OperationLog, ResolutionResult,
+};
+pub use vector_clock::{ClockOrdering, VectorClock};
+
+// TODO: Re-enable when identity module is fixed
 // pub use identity::{IdentityStore, IdentityStoreError, MachineIdentity};
-// pub use vector_clock::{ClockOrdering, VectorClock};

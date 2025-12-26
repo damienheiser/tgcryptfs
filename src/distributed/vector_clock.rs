@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::cmp::Ordering;
 use uuid::Uuid;
 
 /// Vector clock for tracking causality in distributed systems
