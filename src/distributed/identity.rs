@@ -122,12 +122,12 @@ impl MachineIdentity {
     }
 
     /// Serialize to bytes for storage
-    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+    pub fn to_bytes(&self) -> std::result::Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }
 
     /// Deserialize from bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+    pub fn from_bytes(bytes: &[u8]) -> std::result::Result<Self, serde_json::Error> {
         serde_json::from_slice(bytes)
     }
 }
@@ -191,13 +191,13 @@ impl IdentityStore {
     const IDENTITY_KEY: &'static [u8] = b"machine_identity";
 
     /// Create a new identity store
-    pub fn new(db: sled::Db) -> Result<Self, sled::Error> {
+    pub fn new(db: sled::Db) -> std::result::Result<Self, sled::Error> {
         let tree = db.open_tree("machine")?;
         Ok(Self { db: tree })
     }
 
     /// Load the machine identity from storage
-    pub fn load(&self) -> Result<Option<MachineIdentity>, IdentityStoreError> {
+    pub fn load(&self) -> std::result::Result<Option<MachineIdentity>, IdentityStoreError> {
         match self.db.get(Self::IDENTITY_KEY)? {
             Some(bytes) => {
                 let identity = MachineIdentity::from_bytes(&bytes)?;
@@ -208,7 +208,7 @@ impl IdentityStore {
     }
 
     /// Save the machine identity to storage
-    pub fn save(&self, identity: &MachineIdentity) -> Result<(), IdentityStoreError> {
+    pub fn save(&self, identity: &MachineIdentity) -> std::result::Result<(), IdentityStoreError> {
         let bytes = identity.to_bytes()?;
         self.db.insert(Self::IDENTITY_KEY, bytes.as_slice())?;
         self.db.flush()?;
@@ -221,7 +221,7 @@ impl IdentityStore {
         machine_name: String,
         master_key: &[u8; 32],
         config: &EncryptionConfig,
-    ) -> Result<MachineIdentity, IdentityStoreError> {
+    ) -> std::result::Result<MachineIdentity, IdentityStoreError> {
         if let Some(identity) = self.load()? {
             Ok(identity)
         } else {
@@ -232,7 +232,7 @@ impl IdentityStore {
     }
 
     /// Delete the machine identity (use with caution!)
-    pub fn delete(&self) -> Result<(), sled::Error> {
+    pub fn delete(&self) -> std::result::Result<(), sled::Error> {
         self.db.remove(Self::IDENTITY_KEY)?;
         self.db.flush()?;
         Ok(())

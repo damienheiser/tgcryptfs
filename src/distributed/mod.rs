@@ -17,8 +17,7 @@ pub mod types;
 pub mod crdt;
 pub mod vector_clock;
 
-// TODO: This module has compilation errors and needs to be fixed
-// pub mod identity;
+pub mod identity;
 
 // Re-export master-replica types
 pub use replication::{
@@ -39,5 +38,4 @@ pub use crdt::{
 };
 pub use vector_clock::{ClockOrdering, VectorClock};
 
-// TODO: Re-enable when identity module is fixed
-// pub use identity::{IdentityStore, IdentityStoreError, MachineIdentity};
+pub use identity::{IdentityStore, IdentityStoreError, MachineIdentity};
