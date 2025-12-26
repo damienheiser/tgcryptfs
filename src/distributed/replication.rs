@@ -9,15 +9,13 @@
 use crate::crypto::{decrypt, encrypt, EncryptedData, KEY_SIZE};
 use crate::error::{Error, Result};
 use crate::metadata::{Inode, MetadataStore};
-use crate::snapshot::Snapshot;
 use crate::telegram::TelegramBackend;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Replication role for a machine

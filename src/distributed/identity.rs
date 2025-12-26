@@ -1,6 +1,9 @@
 //! Machine identity management for distributed TelegramFS
 
-use crate::crypto::{derive_key, CryptoError};
+use crate::config::EncryptionConfig;
+use crate::crypto::derive_key;
+use crate::error::{Error, Result};
+use ring::rand::SecureRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
@@ -45,27 +48,28 @@ impl MachineIdentity {
     /// # Arguments
     /// * `machine_name` - Human-readable name for this machine
     /// * `master_key` - The master encryption key (from password derivation)
+    /// * `config` - Encryption configuration for key derivation
     ///
     /// # Returns
     /// A new MachineIdentity with generated UUID and derived keys
-    pub fn generate(machine_name: String, master_key: &[u8; 32]) -> Result<Self, CryptoError> {
+    pub fn generate(machine_name: String, master_key: &[u8; 32], config: &EncryptionConfig) -> Result<Self> {
         let machine_id = Uuid::new_v4();
         let now = SystemTime::now();
 
         // Derive machine-specific key from master key + machine ID
-        let machine_key = Self::derive_machine_key(master_key, machine_id)?;
+        let machine_key = Self::derive_machine_key(master_key, machine_id, config)?;
 
         // Generate Ed25519 key pair for signing
         let private_key_seed = {
             let mut seed = [0u8; 32];
             ring::rand::SystemRandom::new()
                 .fill(&mut seed)
-                .map_err(|_| CryptoError::KeyGeneration)?;
+                .map_err(|_| Error::KeyDerivation("Failed to generate random seed".to_string()))?;
             seed
         };
 
         let key_pair = Ed25519KeyPair::from_seed_unchecked(&private_key_seed)
-            .map_err(|_| CryptoError::KeyGeneration)?;
+            .map_err(|_| Error::KeyDerivation("Failed to create Ed25519 key pair".to_string()))?;
         let public_key_bytes = key_pair.public_key().as_ref();
         let mut public_key = [0u8; 32];
         public_key.copy_from_slice(public_key_bytes);
@@ -84,19 +88,22 @@ impl MachineIdentity {
     /// Derive machine-specific encryption key from master key and machine ID
     ///
     /// This ensures each machine has its own encryption key even with the same master password
-    fn derive_machine_key(master_key: &[u8; 32], machine_id: Uuid) -> Result<[u8; 32], CryptoError> {
+    fn derive_machine_key(master_key: &[u8; 32], machine_id: Uuid, config: &EncryptionConfig) -> Result<[u8; 32]> {
         let context = format!("telegramfs-machine-{}", machine_id);
-        derive_key(master_key, context.as_bytes())
+        let derived = derive_key(master_key, Some(context.as_bytes()), config)?;
+        let mut key = [0u8; 32];
+        key.copy_from_slice(derived.key());
+        Ok(key)
     }
 
     /// Get the Ed25519 key pair for signing
-    pub fn key_pair(&self) -> Result<Ed25519KeyPair, CryptoError> {
+    pub fn key_pair(&self) -> Result<Ed25519KeyPair> {
         Ed25519KeyPair::from_seed_unchecked(&self.private_key_seed)
-            .map_err(|_| CryptoError::KeyGeneration)
+            .map_err(|_| Error::KeyDerivation("Failed to create key pair".to_string()))
     }
 
     /// Sign data with this machine's private key
-    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    pub fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
         let key_pair = self.key_pair()?;
         Ok(key_pair.sign(data).as_ref().to_vec())
     }
@@ -213,12 +220,12 @@ impl IdentityStore {
         &self,
         machine_name: String,
         master_key: &[u8; 32],
+        config: &EncryptionConfig,
     ) -> Result<MachineIdentity, IdentityStoreError> {
         if let Some(identity) = self.load()? {
             Ok(identity)
         } else {
-            let identity = MachineIdentity::generate(machine_name, master_key)
-                .map_err(IdentityStoreError::Crypto)?;
+            let identity = MachineIdentity::generate(machine_name, master_key, config)?;
             self.save(&identity)?;
             Ok(identity)
         }
@@ -241,8 +248,8 @@ pub enum IdentityStoreError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
-    #[error("Cryptography error: {0}")]
-    Crypto(#[from] CryptoError),
+    #[error("Error: {0}")]
+    Error(#[from] Error),
 }
 
 #[cfg(test)]
@@ -255,10 +262,20 @@ mod tests {
         key
     }
 
+    fn test_config() -> EncryptionConfig {
+        EncryptionConfig {
+            argon2_memory_kib: 1024,
+            argon2_iterations: 1,
+            argon2_parallelism: 1,
+            salt: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_generate_identity() {
         let master_key = test_master_key();
-        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key)
+        let config = test_config();
+        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key, &config)
             .expect("Failed to generate identity");
 
         assert_eq!(identity.machine_name, "test-machine");
@@ -270,11 +287,12 @@ mod tests {
     #[test]
     fn test_machine_key_derivation() {
         let master_key = test_master_key();
+        let config = test_config();
         let machine_id = Uuid::new_v4();
 
-        let key1 = MachineIdentity::derive_machine_key(&master_key, machine_id)
+        let key1 = MachineIdentity::derive_machine_key(&master_key, machine_id, &config)
             .expect("Failed to derive key");
-        let key2 = MachineIdentity::derive_machine_key(&master_key, machine_id)
+        let key2 = MachineIdentity::derive_machine_key(&master_key, machine_id, &config)
             .expect("Failed to derive key");
 
         // Same inputs should produce same key
@@ -282,7 +300,7 @@ mod tests {
 
         // Different machine ID should produce different key
         let different_id = Uuid::new_v4();
-        let key3 = MachineIdentity::derive_machine_key(&master_key, different_id)
+        let key3 = MachineIdentity::derive_machine_key(&master_key, different_id, &config)
             .expect("Failed to derive key");
         assert_ne!(key1, key3);
     }
@@ -290,7 +308,8 @@ mod tests {
     #[test]
     fn test_sign_and_verify() {
         let master_key = test_master_key();
-        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key)
+        let config = test_config();
+        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key, &config)
             .expect("Failed to generate identity");
 
         let data = b"Hello, TelegramFS!";
@@ -303,7 +322,8 @@ mod tests {
     #[test]
     fn test_serialization() {
         let master_key = test_master_key();
-        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key)
+        let config = test_config();
+        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key, &config)
             .expect("Failed to generate identity");
 
         let bytes = identity.to_bytes().expect("Failed to serialize");
@@ -319,7 +339,8 @@ mod tests {
     #[test]
     fn test_set_name() {
         let master_key = test_master_key();
-        let mut identity = MachineIdentity::generate("old-name".to_string(), &master_key)
+        let config = test_config();
+        let mut identity = MachineIdentity::generate("old-name".to_string(), &master_key, &config)
             .expect("Failed to generate identity");
 
         let original_updated = identity.updated_at;
@@ -332,17 +353,18 @@ mod tests {
 
     #[test]
     fn test_identity_store() {
-        let config = sled::Config::new().temporary(true);
-        let db = config.open().expect("Failed to open database");
+        let sled_config = sled::Config::new().temporary(true);
+        let db = sled_config.open().expect("Failed to open database");
         let store = IdentityStore::new(db).expect("Failed to create store");
 
         let master_key = test_master_key();
+        let enc_config = test_config();
 
         // Initially empty
         assert!(store.load().expect("Failed to load").is_none());
 
         // Create and save
-        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key)
+        let identity = MachineIdentity::generate("test-machine".to_string(), &master_key, &enc_config)
             .expect("Failed to generate identity");
         store.save(&identity).expect("Failed to save");
 
@@ -357,20 +379,21 @@ mod tests {
 
     #[test]
     fn test_get_or_create() {
-        let config = sled::Config::new().temporary(true);
-        let db = config.open().expect("Failed to open database");
+        let sled_config = sled::Config::new().temporary(true);
+        let db = sled_config.open().expect("Failed to open database");
         let store = IdentityStore::new(db).expect("Failed to create store");
 
         let master_key = test_master_key();
+        let enc_config = test_config();
 
         // First call creates
         let identity1 = store
-            .get_or_create("test-machine".to_string(), &master_key)
+            .get_or_create("test-machine".to_string(), &master_key, &enc_config)
             .expect("Failed to get or create");
 
         // Second call retrieves existing
         let identity2 = store
-            .get_or_create("different-name".to_string(), &master_key)
+            .get_or_create("different-name".to_string(), &master_key, &enc_config)
             .expect("Failed to get or create");
 
         // Should be the same identity (name not changed)

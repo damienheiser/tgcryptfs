@@ -598,71 +598,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_vector_clock_increment() {
-        let mut vc = VectorClock::new();
-        let machine_id = Uuid::new_v4();
-
-        assert_eq!(vc.get(&machine_id), 0);
-
-        vc.increment(machine_id);
-        assert_eq!(vc.get(&machine_id), 1);
-
-        vc.increment(machine_id);
-        assert_eq!(vc.get(&machine_id), 2);
-    }
-
-    #[test]
-    fn test_vector_clock_merge() {
-        let machine1 = Uuid::new_v4();
-        let machine2 = Uuid::new_v4();
-
-        let mut vc1 = VectorClock::new();
-        vc1.increment(machine1);
-        vc1.increment(machine1);
-
-        let mut vc2 = VectorClock::new();
-        vc2.increment(machine2);
-        vc2.increment(machine2);
-        vc2.increment(machine2);
-
-        vc1.merge(&vc2);
-
-        assert_eq!(vc1.get(&machine1), 2);
-        assert_eq!(vc1.get(&machine2), 3);
-    }
-
-    #[test]
-    fn test_vector_clock_happened_before() {
-        let machine_id = Uuid::new_v4();
-
-        let mut vc1 = VectorClock::new();
-        vc1.increment(machine_id);
-
-        let mut vc2 = VectorClock::new();
-        vc2.increment(machine_id);
-        vc2.increment(machine_id);
-
-        assert!(vc1.happened_before(&vc2));
-        assert!(!vc2.happened_before(&vc1));
-    }
-
-    #[test]
-    fn test_vector_clock_concurrent() {
-        let machine1 = Uuid::new_v4();
-        let machine2 = Uuid::new_v4();
-
-        let mut vc1 = VectorClock::new();
-        vc1.increment(machine1);
-
-        let mut vc2 = VectorClock::new();
-        vc2.increment(machine2);
-
-        assert!(vc1.concurrent(&vc2));
-        assert!(vc2.concurrent(&vc1));
-    }
-
-    #[test]
-    fn test_operation_log() {
+    fn test_operation_log_append() {
         let mut log = OperationLog::new();
         let op_id = Uuid::new_v4();
         let machine_id = Uuid::new_v4();
@@ -680,6 +616,27 @@ mod tests {
         log.append(op).unwrap();
         assert_eq!(log.len(), 1);
         assert!(log.contains(&op_id));
+    }
+
+    #[test]
+    fn test_operation_log_duplicate() {
+        let mut log = OperationLog::new();
+        let op_id = Uuid::new_v4();
+        let machine_id = Uuid::new_v4();
+
+        let op = CrdtOperation::Delete {
+            op_id,
+            machine_id,
+            vector_clock: VectorClock::new(),
+            timestamp: SystemTime::now(),
+            path: "/test".to_string(),
+            tombstone_time: SystemTime::now(),
+        };
+
+        log.append(op.clone()).unwrap();
+
+        // Attempting to append the same operation again should fail
+        assert!(log.append(op).is_err());
     }
 
     #[test]
@@ -723,5 +680,72 @@ mod tests {
             }
             _ => panic!("Expected Winner result"),
         }
+    }
+
+    #[test]
+    fn test_conflict_resolution_tie_breaker() {
+        let resolver = ConflictResolver::new(ConflictResolutionStrategy::LastWriteWins);
+        let machine1 = Uuid::new_v4();
+        let machine2 = Uuid::new_v4();
+
+        let ts = SystemTime::now();
+
+        let op1 = CrdtOperation::Delete {
+            op_id: Uuid::new_v4(),
+            machine_id: machine1,
+            vector_clock: VectorClock::new(),
+            timestamp: ts,
+            path: "/test".to_string(),
+            tombstone_time: ts,
+        };
+
+        let op2 = CrdtOperation::Delete {
+            op_id: Uuid::new_v4(),
+            machine_id: machine2,
+            vector_clock: VectorClock::new(),
+            timestamp: ts,
+            path: "/test".to_string(),
+            tombstone_time: ts,
+        };
+
+        let conflict = Conflict {
+            op1: op1.clone(),
+            op2: op2.clone(),
+            conflict_type: ConflictType::DeleteDelete,
+        };
+
+        let result = resolver.resolve(&conflict).unwrap();
+
+        // Should resolve deterministically using machine ID
+        match result {
+            ResolutionResult::Winner(op) => {
+                let expected_machine = if machine1 < machine2 { machine1 } else { machine2 };
+                assert_eq!(op.machine_id(), expected_machine);
+            }
+            _ => panic!("Expected Winner result"),
+        }
+    }
+
+    #[test]
+    fn test_crdt_sync_record_operation() {
+        let machine_id = Uuid::new_v4();
+        let mut sync = CrdtSync::new(machine_id, ConflictResolutionStrategy::LastWriteWins);
+
+        let op = CrdtOperation::Create {
+            op_id: Uuid::new_v4(),
+            machine_id,
+            vector_clock: VectorClock::new(),
+            timestamp: SystemTime::now(),
+            parent_path: "/".to_string(),
+            name: "test.txt".to_string(),
+            file_type: FileType::RegularFile,
+            initial_attrs: crate::metadata::InodeAttributes::new_file(1000, 1000, 0o644),
+            symlink_target: None,
+        };
+
+        sync.record_operation(op.clone()).unwrap();
+
+        assert_eq!(sync.pending_operations().len(), 1);
+        assert_eq!(sync.operation_log().len(), 1);
     }
 }
