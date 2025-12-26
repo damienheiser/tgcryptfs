@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Current synchronization status
 #[derive(Debug, Clone, Serialize, Deserialize)]
