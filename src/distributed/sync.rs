@@ -168,71 +168,76 @@ impl SyncDaemon {
         }
     }
 
-    /// Start the sync daemon
+    /// Start the sync daemon in a blocking manner
     ///
-    /// This spawns a background task that runs the sync loop
-    pub fn start(&self) -> tokio::task::JoinHandle<()> {
+    /// This runs the sync loop in the current async context.
+    /// It should be spawned as a separate task by the caller if background execution is needed.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let daemon = SyncDaemon::new(snapshot_manager, config);
+    /// tokio::task::spawn_local(daemon.start());
+    /// ```
+    pub async fn start(self) {
         let snapshot_manager = self.snapshot_manager.clone();
         let config = self.config.clone();
         let status = self.status.clone();
         let shutdown = self.shutdown.clone();
 
-        tokio::spawn(async move {
-            info!(
-                "Starting sync daemon in {:?} mode (interval: {}s)",
-                config.role, config.sync_interval_secs
-            );
+        info!(
+            "Starting sync daemon in {:?} mode (interval: {}s)",
+            config.role, config.sync_interval_secs
+        );
 
-            // Mark as running
-            {
-                let mut s = status.write().await;
-                s.is_running = true;
+        // Mark as running
+        {
+            let mut s = status.write().await;
+            s.is_running = true;
+        }
+
+        // Create an interval timer
+        let mut sync_interval = interval(Duration::from_secs(config.sync_interval_secs));
+
+        loop {
+            // Check for shutdown
+            if *shutdown.read().await {
+                info!("Sync daemon shutting down");
+                break;
             }
 
-            // Create an interval timer
-            let mut sync_interval = interval(Duration::from_secs(config.sync_interval_secs));
+            // Wait for next tick
+            sync_interval.tick().await;
 
-            loop {
-                // Check for shutdown
-                if *shutdown.read().await {
-                    info!("Sync daemon shutting down");
-                    break;
+            // Perform sync based on role
+            let result = match config.role {
+                ReplicationRole::Master => Self::master_sync(&snapshot_manager).await,
+                ReplicationRole::Replica => Self::replica_sync(&snapshot_manager).await,
+            };
+
+            // Update status
+            let mut s = status.write().await;
+            match result {
+                Ok((version, inode_count, duration_ms)) => {
+                    s.mark_success(version, inode_count, duration_ms);
+                    info!(
+                        "Sync successful: version {}, {} inodes, {}ms",
+                        version, inode_count, duration_ms
+                    );
                 }
-
-                // Wait for next tick
-                sync_interval.tick().await;
-
-                // Perform sync based on role
-                let result = match config.role {
-                    ReplicationRole::Master => Self::master_sync(&snapshot_manager).await,
-                    ReplicationRole::Replica => Self::replica_sync(&snapshot_manager).await,
-                };
-
-                // Update status
-                let mut s = status.write().await;
-                match result {
-                    Ok((version, inode_count, duration_ms)) => {
-                        s.mark_success(version, inode_count, duration_ms);
-                        info!(
-                            "Sync successful: version {}, {} inodes, {}ms",
-                            version, inode_count, duration_ms
-                        );
-                    }
-                    Err(e) => {
-                        s.mark_error(e.to_string());
-                        error!("Sync failed: {}", e);
-                    }
+                Err(e) => {
+                    s.mark_error(e.to_string());
+                    error!("Sync failed: {}", e);
                 }
             }
+        }
 
-            // Mark as not running
-            {
-                let mut s = status.write().await;
-                s.is_running = false;
-            }
+        // Mark as not running
+        {
+            let mut s = status.write().await;
+            s.is_running = false;
+        }
 
-            info!("Sync daemon stopped");
-        })
+        info!("Sync daemon stopped");
     }
 
     /// Perform a master sync (create and upload snapshot)
