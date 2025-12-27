@@ -1,8 +1,8 @@
-# TelegramFS Distributed Architecture
+# tgcryptfs Distributed Architecture
 
 ## Overview
 
-TelegramFS supports three distribution modes that can coexist:
+tgcryptfs supports three distribution modes that can coexist:
 
 1. **Standalone** - Single machine, independent filesystem
 2. **Namespace Isolation** - Multiple independent filesystems on same Telegram account
@@ -44,7 +44,7 @@ TelegramFS supports three distribution modes that can coexist:
 
 ### 1. Machine Identity
 
-Every TelegramFS instance has a unique identity:
+Every tgcryptfs instance has a unique identity:
 
 ```rust
 pub struct MachineIdentity {
@@ -385,7 +385,7 @@ pub struct Permissions {
 ### Full Config Example
 
 ```yaml
-# TelegramFS Configuration
+# tgcryptfs Configuration
 version: 2
 
 # Machine identity
@@ -397,11 +397,11 @@ machine:
 telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
-  session_file: "~/.telegramfs/session"
+  session_file: "~/.tgcryptfs/session"
 
 # Encryption
 encryption:
-  master_password: ${TELEGRAMFS_PASSWORD}
+  master_password: ${TGCRYPTFS_PASSWORD}
   kdf_iterations: 3
   kdf_memory_mb: 64
 
@@ -426,19 +426,19 @@ namespaces:
   # Private namespace (standalone)
   - name: "private"
     type: standalone
-    mount_point: "/mnt/telegramfs/private"
+    mount_point: "/mnt/tgcryptfs/private"
 
   # Shared namespace (master-replica)
   - name: "backups"
     type: master-replica
     master: "cloudyday-server"
-    mount_point: "/mnt/telegramfs/backups"
+    mount_point: "/mnt/tgcryptfs/backups"
 
   # Fully distributed namespace
   - name: "shared"
     type: distributed
     cluster: "home-cluster"
-    mount_point: "/mnt/telegramfs/shared"
+    mount_point: "/mnt/tgcryptfs/shared"
     access:
       - machine: "cloudyday-server"
         permissions: [read, write, delete, admin]
@@ -449,12 +449,12 @@ namespaces:
 cache:
   enabled: true
   max_size_gb: 10
-  path: "~/.telegramfs/cache"
+  path: "~/.tgcryptfs/cache"
 
 # Logging
 logging:
   level: info
-  file: "~/.telegramfs/telegramfs.log"
+  file: "~/.tgcryptfs/tgcryptfs.log"
 ```
 
 ## Implementation Phases
@@ -493,27 +493,27 @@ logging:
 
 ```bash
 # Machine management
-telegramfs machine init --name "my-machine"
-telegramfs machine show
-telegramfs machine list  # Show cluster members
+tgcryptfs machine init --name "my-machine"
+tgcryptfs machine show
+tgcryptfs machine list  # Show cluster members
 
 # Namespace management
-telegramfs namespace create <name> --type standalone|master-replica|distributed
-telegramfs namespace list
-telegramfs namespace mount <name> <path>
+tgcryptfs namespace create <name> --type standalone|master-replica|distributed
+tgcryptfs namespace list
+tgcryptfs namespace mount <name> <path>
 
 # Cluster management
-telegramfs cluster create <cluster-id>
-telegramfs cluster join <cluster-id> --role master|replica|node
-telegramfs cluster status
-telegramfs cluster members
+tgcryptfs cluster create <cluster-id>
+tgcryptfs cluster join <cluster-id> --role master|replica|node
+tgcryptfs cluster status
+tgcryptfs cluster members
 
 # Sync management
-telegramfs sync status
-telegramfs sync now  # Force immediate sync
-telegramfs sync history
+tgcryptfs sync status
+tgcryptfs sync now  # Force immediate sync
+tgcryptfs sync history
 
 # Access control
-telegramfs acl set <namespace> --machine <id> --permissions read,write
-telegramfs acl list <namespace>
+tgcryptfs acl set <namespace> --machine <id> --permissions read,write
+tgcryptfs acl list <namespace>
 ```

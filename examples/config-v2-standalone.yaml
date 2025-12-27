@@ -1,16 +1,16 @@
-# TelegramFS Configuration v2 - Standalone Mode Example
+# tgcryptfs Configuration v2 - Standalone Mode Example
 version: 2
 
 # Machine identity
 machine:
   id: "auto"  # Will auto-generate UUID on first run
-  name: "My TelegramFS"
+  name: "My tgcryptfs"
 
 # Telegram backend
 telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
-  session_file: "~/.telegramfs/session"
+  session_file: "~/.tgcryptfs/session"
   max_concurrent_uploads: 3
   max_concurrent_downloads: 5
   retry_attempts: 3
@@ -31,12 +31,12 @@ distribution:
 namespaces:
   - name: "default"
     type: standalone
-    mount_point: "/mnt/telegramfs"
+    mount_point: "/mnt/tgcryptfs"
 
 # Cache settings
 cache:
   max_size: 1073741824
-  cache_dir: "~/.telegramfs/cache"
+  cache_dir: "~/.tgcryptfs/cache"
   prefetch_enabled: true
   prefetch_count: 3
   eviction_policy: Lru

@@ -89,6 +89,19 @@ cargo build --release
 sudo cp target/release/tgcryptfs /usr/local/bin/
 ```
 
+#### Building with Embedded API Keys
+
+If you want to distribute pre-configured binaries with your API credentials embedded (useful for tracking usage or simplifying deployment), you can set environment variables at build time:
+
+```bash
+# Build with embedded credentials
+TGCRYPTFS_DEFAULT_API_ID=12345678 \
+TGCRYPTFS_DEFAULT_API_HASH=your_api_hash \
+cargo build --release
+```
+
+Binaries built this way will use the embedded credentials by default, but users can still override them with runtime environment variables (`TELEGRAM_APP_ID`, `TELEGRAM_APP_HASH`).
+
 ### Step 5: Initial Configuration
 
 ```bash

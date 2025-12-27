@@ -1,4 +1,4 @@
-//! Namespace system for TelegramFS
+//! Namespace system for tgcryptfs
 //!
 //! Namespaces provide logical isolation of filesystems on the same Telegram account.
 //! Multiple namespaces can coexist without interfering with each other.

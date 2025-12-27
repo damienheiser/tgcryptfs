@@ -1,4 +1,4 @@
-# TelegramFS Configuration v2
+# tgcryptfs Configuration v2
 
 ## Overview
 
@@ -7,7 +7,7 @@ Configuration v2 introduces comprehensive support for distributed modes, multipl
 ## Key Features
 
 ### 1. Machine Identity
-Every TelegramFS instance has a unique identity:
+Every tgcryptfs instance has a unique identity:
 - **Machine ID**: Auto-generated UUID or custom identifier
 - **Machine Name**: Human-readable name for the machine
 
@@ -71,7 +71,7 @@ machine:
 telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
-  session_file: "~/.telegramfs/session"
+  session_file: "~/.tgcryptfs/session"
   max_concurrent_uploads: 3
   max_concurrent_downloads: 5
   retry_attempts: 3
@@ -121,7 +121,7 @@ namespaces:
 # Cache settings
 cache:
   max_size: 1073741824  # 1 GB
-  cache_dir: "~/.telegramfs/cache"
+  cache_dir: "~/.tgcryptfs/cache"
   prefetch_enabled: true
   prefetch_count: 3
   eviction_policy: Lru
@@ -129,7 +129,7 @@ cache:
 # Logging
 logging:
   level: "info"
-  file: "~/.telegramfs/telegramfs.log"
+  file: "~/.tgcryptfs/tgcryptfs.log"
 ```
 
 ## CLI Commands
@@ -137,45 +137,45 @@ logging:
 ### Machine Management
 ```bash
 # Initialize machine identity
-telegramfs machine init
-telegramfs machine init --name "my-server"
+tgcryptfs machine init
+tgcryptfs machine init --name "my-server"
 
 # Show machine info
-telegramfs machine show
+tgcryptfs machine show
 ```
 
 ### Namespace Management
 ```bash
 # Create namespaces
-telegramfs namespace create <name> --type standalone
-telegramfs namespace create <name> --type master-replica --master <master-id>
-telegramfs namespace create <name> --type distributed --cluster <cluster-id>
+tgcryptfs namespace create <name> --type standalone
+tgcryptfs namespace create <name> --type master-replica --master <master-id>
+tgcryptfs namespace create <name> --type distributed --cluster <cluster-id>
 
 # List namespaces
-telegramfs namespace list
+tgcryptfs namespace list
 ```
 
 ### Cluster Management
 ```bash
 # Create new cluster
-telegramfs cluster create <cluster-id>
+tgcryptfs cluster create <cluster-id>
 
 # Join existing cluster
-telegramfs cluster join <cluster-id> --role master
-telegramfs cluster join <cluster-id> --role replica
-telegramfs cluster join <cluster-id> --role node
+tgcryptfs cluster join <cluster-id> --role master
+tgcryptfs cluster join <cluster-id> --role replica
+tgcryptfs cluster join <cluster-id> --role node
 
 # Show cluster status
-telegramfs cluster status
+tgcryptfs cluster status
 ```
 
 ### Sync Management
 ```bash
 # Show sync status
-telegramfs sync status
+tgcryptfs sync status
 
 # Force immediate sync
-telegramfs sync now
+tgcryptfs sync now
 ```
 
 ## Implementation Details
@@ -234,8 +234,8 @@ cargo check
 # Run with example config
 export TELEGRAM_APP_ID="your_id"
 export TELEGRAM_APP_HASH="your_hash"
-telegramfs machine init --name "test"
-telegramfs cluster create "test-cluster"
-telegramfs namespace create "test" --type distributed --cluster "test-cluster"
-telegramfs cluster status
+tgcryptfs machine init --name "test"
+tgcryptfs cluster create "test-cluster"
+tgcryptfs namespace create "test" --type distributed --cluster "test-cluster"
+tgcryptfs cluster status
 ```

@@ -1,4 +1,4 @@
-# TelegramFS Configuration v2 - Master-Replica Mode Example
+# tgcryptfs Configuration v2 - Master-Replica Mode Example
 version: 2
 
 # Machine identity
@@ -10,7 +10,7 @@ machine:
 telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
-  session_file: "~/.telegramfs/session"
+  session_file: "~/.tgcryptfs/session"
   max_concurrent_uploads: 3
   max_concurrent_downloads: 5
   retry_attempts: 3
@@ -40,18 +40,18 @@ namespaces:
   # Private namespace
   - name: "private"
     type: standalone
-    mount_point: "/mnt/telegramfs/private"
+    mount_point: "/mnt/tgcryptfs/private"
 
   # Shared namespace (master-replica)
   - name: "backups"
     type: master-replica
     master: "cloudyday-server"
-    mount_point: "/mnt/telegramfs/backups"
+    mount_point: "/mnt/tgcryptfs/backups"
 
 # Cache settings
 cache:
   max_size: 1073741824
-  cache_dir: "~/.telegramfs/cache"
+  cache_dir: "~/.tgcryptfs/cache"
   prefetch_enabled: true
   prefetch_count: 3
   eviction_policy: Lru
@@ -59,4 +59,4 @@ cache:
 # Logging
 logging:
   level: "info"
-  file: "~/.telegramfs/telegramfs.log"
+  file: "~/.tgcryptfs/tgcryptfs.log"

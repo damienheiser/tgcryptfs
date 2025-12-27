@@ -1,4 +1,4 @@
-//! CRDT-based distributed write system for TelegramFS
+//! CRDT-based distributed write system for tgcryptfs
 //!
 //! This module implements Conflict-free Replicated Data Types (CRDTs) for
 //! distributed filesystem operations. It enables multiple nodes to perform

@@ -1,10 +1,10 @@
-# TelegramFS Security Model
+# tgcryptfs Security Model
 
-This document describes the security architecture, threat model, and cryptographic design of TelegramFS.
+This document describes the security architecture, threat model, and cryptographic design of tgcryptfs.
 
 ## Security Goals
 
-TelegramFS is designed to achieve the following security properties:
+tgcryptfs is designed to achieve the following security properties:
 
 1. **Confidentiality**: File contents, names, and directory structure are hidden from Telegram and network observers
 2. **Integrity**: Any tampering with stored data is detected
@@ -28,7 +28,7 @@ TelegramFS is designed to achieve the following security properties:
 | Threat | Reason |
 |--------|--------|
 | Compromised local machine | If attacker has root, game over |
-| Malicious TelegramFS binary | Supply chain attacks not addressed |
+| Malicious tgcryptfs binary | Supply chain attacks not addressed |
 | Side-channel attacks | Not hardened against timing/power analysis |
 | Rubber-hose cryptanalysis | Can't help with physical coercion |
 
@@ -80,8 +80,8 @@ TelegramFS is designed to achieve the following security properties:
 
 **Purpose-specific derivation**:
 ```
-Metadata Key = HKDF(Master Key, salt, "telegramfs-metadata-v1")
-Chunk Key    = HKDF(Master Key, salt, "telegramfs-chunk-v1:<chunk_id>")
+Metadata Key = HKDF(Master Key, salt, "tgcryptfs-metadata-v1")
+Chunk Key    = HKDF(Master Key, salt, "tgcryptfs-chunk-v1:<chunk_id>")
 ```
 
 **Why per-chunk keys?**
@@ -161,7 +161,7 @@ Telegram cannot determine:
 **Cache directory**:
 - Contains **decrypted** chunk data for performance
 - Protected only by filesystem permissions
-- Clear with `telegramfs cache --clear`
+- Clear with `tgcryptfs cache --clear`
 
 **Configuration**:
 - Contains salt (not secret, but needed)
@@ -238,7 +238,7 @@ The local cache stores **decrypted** data for performance. This means:
 - Use full-disk encryption for defense in depth
 
 **Mitigation**:
-- Clear cache: `telegramfs cache --clear`
+- Clear cache: `tgcryptfs cache --clear`
 - Disable cache (not implemented, future feature)
 - Use encrypted filesystem for cache directory
 
@@ -294,9 +294,9 @@ Keep offline backups of critical data.
 
 ### Configuration Security
 
-Protect `~/.config/telegramfs/config.json`:
+Protect `~/.config/tgcryptfs/config.json`:
 ```bash
-chmod 600 ~/.config/telegramfs/config.json
+chmod 600 ~/.config/tgcryptfs/config.json
 ```
 
 This file contains your Telegram API credentials.

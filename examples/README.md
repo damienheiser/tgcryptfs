@@ -1,6 +1,6 @@
-# TelegramFS Configuration Examples
+# tgcryptfs Configuration Examples
 
-This directory contains example configuration files for different TelegramFS deployment modes.
+This directory contains example configuration files for different tgcryptfs deployment modes.
 
 ## Configuration Files
 
@@ -33,10 +33,10 @@ This directory contains example configuration files for different TelegramFS dep
 
 ```bash
 # Initialize with auto-generated UUID
-telegramfs machine init
+tgcryptfs machine init
 
 # Or specify a custom name
-telegramfs machine init --name "my-server"
+tgcryptfs machine init --name "my-server"
 ```
 
 ### 2. Create Configuration
@@ -44,8 +44,8 @@ telegramfs machine init --name "my-server"
 Copy one of the example configs:
 
 ```bash
-mkdir -p ~/.config/telegramfs
-cp examples/config-v2-standalone.yaml ~/.config/telegramfs/config.yaml
+mkdir -p ~/.config/tgcryptfs
+cp examples/config-v2-standalone.yaml ~/.config/tgcryptfs/config.yaml
 ```
 
 ### 3. Set Environment Variables
@@ -61,37 +61,37 @@ Or directly edit the config file to replace the `${TELEGRAM_APP_ID}` placeholder
 
 ```bash
 # Standalone namespace
-telegramfs namespace create my-data --type standalone --mount-point /mnt/my-data
+tgcryptfs namespace create my-data --type standalone --mount-point /mnt/my-data
 
 # Master-replica namespace (on master)
-telegramfs namespace create shared --type master-replica --master "cloudyday-server" --mount-point /mnt/shared
+tgcryptfs namespace create shared --type master-replica --master "cloudyday-server" --mount-point /mnt/shared
 
 # Distributed namespace
-telegramfs namespace create collab --type distributed --cluster "home-cluster" --mount-point /mnt/collab
+tgcryptfs namespace create collab --type distributed --cluster "home-cluster" --mount-point /mnt/collab
 ```
 
 ### 5. Cluster Operations
 
 ```bash
 # Create a new cluster
-telegramfs cluster create home-cluster
+tgcryptfs cluster create home-cluster
 
 # Join existing cluster as master
-telegramfs cluster join production --role master
+tgcryptfs cluster join production --role master
 
 # Join as replica
-telegramfs cluster join production --role replica
+tgcryptfs cluster join production --role replica
 
 # Join as distributed node
-telegramfs cluster join home-cluster --role node
+tgcryptfs cluster join home-cluster --role node
 
 # Check cluster status
-telegramfs cluster status
+tgcryptfs cluster status
 ```
 
 ## Configuration Format
 
-TelegramFS supports both YAML (`.yaml`, `.yml`) and JSON (`.json`) formats. The format is auto-detected from the file extension.
+tgcryptfs supports both YAML (`.yaml`, `.yml`) and JSON (`.json`) formats. The format is auto-detected from the file extension.
 
 ### YAML (Recommended)
 ```yaml
@@ -121,7 +121,7 @@ Use `${VAR_NAME}` syntax in config files:
 telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
-  session_file: "${HOME}/.telegramfs/session"
+  session_file: "${HOME}/.tgcryptfs/session"
 ```
 
 ## Configuration Validation
@@ -135,7 +135,7 @@ The config system validates:
 Run validation explicitly:
 
 ```bash
-telegramfs status
+tgcryptfs status
 ```
 
 ## Migration from v1

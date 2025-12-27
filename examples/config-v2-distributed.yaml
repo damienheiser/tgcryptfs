@@ -1,4 +1,4 @@
-# TelegramFS Configuration v2 - Distributed Mode Example
+# tgcryptfs Configuration v2 - Distributed Mode Example
 version: 2
 
 # Machine identity
@@ -11,7 +11,7 @@ telegram:
   api_id: ${TELEGRAM_APP_ID}
   api_hash: ${TELEGRAM_APP_HASH}
   phone: null
-  session_file: "~/.telegramfs/session"
+  session_file: "~/.tgcryptfs/session"
   max_concurrent_uploads: 3
   max_concurrent_downloads: 5
   retry_attempts: 3
@@ -40,13 +40,13 @@ namespaces:
   # Private namespace (standalone)
   - name: "private"
     type: standalone
-    mount_point: "/mnt/telegramfs/private"
+    mount_point: "/mnt/tgcryptfs/private"
 
   # Shared namespace (distributed)
   - name: "shared"
     type: distributed
     cluster: "home-cluster"
-    mount_point: "/mnt/telegramfs/shared"
+    mount_point: "/mnt/tgcryptfs/shared"
     access:
       - machine: "cloudyday-server"
         permissions: [read, write, delete, admin]
@@ -56,7 +56,7 @@ namespaces:
 # Cache settings
 cache:
   max_size: 1073741824  # 1 GB
-  cache_dir: "~/.telegramfs/cache"
+  cache_dir: "~/.tgcryptfs/cache"
   prefetch_enabled: true
   prefetch_count: 3
   eviction_policy: Lru  # Lru | Lfu | Fifo
@@ -64,4 +64,4 @@ cache:
 # Logging
 logging:
   level: "info"  # trace | debug | info | warn | error
-  file: "~/.telegramfs/telegramfs.log"
+  file: "~/.tgcryptfs/tgcryptfs.log"

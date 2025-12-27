@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt() {
         let key = test_key();
-        let plaintext = b"Hello, TelegramFS!";
+        let plaintext = b"Hello, tgcryptfs!";
 
         let encrypted = encrypt_simple(&key, plaintext).unwrap();
         let decrypted = decrypt_simple(&key, &encrypted).unwrap();

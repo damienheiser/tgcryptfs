@@ -31,7 +31,7 @@ jobs:
           draft: false
           prerelease: false
           body: |
-            ## TelegramFS ${{ steps.get_version.outputs.version }}
+            ## tgcryptfs ${{ steps.get_version.outputs.version }}
 
             ### Installation
 
@@ -39,17 +39,17 @@ jobs:
 
             ```bash
             # Linux
-            chmod +x telegramfs-linux-x86_64
-            sudo mv telegramfs-linux-x86_64 /usr/local/bin/telegramfs
+            chmod +x tgcryptfs-linux-x86_64
+            sudo mv tgcryptfs-linux-x86_64 /usr/local/bin/tgcryptfs
 
             # macOS
-            chmod +x telegramfs-macos-x86_64
-            sudo mv telegramfs-macos-x86_64 /usr/local/bin/telegramfs
+            chmod +x tgcryptfs-macos-x86_64
+            sudo mv tgcryptfs-macos-x86_64 /usr/local/bin/tgcryptfs
             ```
 
             ### Changelog
 
-            See [CHANGELOG.md](https://github.com/damienheiser/telegramfs/blob/main/CHANGELOG.md) for details.
+            See [CHANGELOG.md](https://github.com/damienheiser/tgcryptfs/blob/main/CHANGELOG.md) for details.
 
   build-release:
     name: Build Release
@@ -59,16 +59,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: telegramfs
-            asset_name: telegramfs-linux-x86_64
+            artifact_name: tgcryptfs
+            asset_name: tgcryptfs-linux-x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: telegramfs
-            asset_name: telegramfs-macos-x86_64
+            artifact_name: tgcryptfs
+            asset_name: tgcryptfs-macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: telegramfs
-            asset_name: telegramfs-macos-aarch64
+            artifact_name: tgcryptfs
+            asset_name: tgcryptfs-macos-aarch64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -112,6 +112,11 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-build-target-
 
       - name: Build release binary
+        env:
+          # Optional: Embed default Telegram API credentials in release builds
+          # Set these secrets in your GitHub repository settings to enable
+          TGCRYPTFS_DEFAULT_API_ID: ${{ secrets.TGCRYPTFS_DEFAULT_API_ID }}
+          TGCRYPTFS_DEFAULT_API_HASH: ${{ secrets.TGCRYPTFS_DEFAULT_API_HASH }}
         run: cargo build --release --target ${{ matrix.target }} --verbose
 
       - name: Strip binary (Linux)

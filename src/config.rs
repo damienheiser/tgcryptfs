@@ -5,6 +5,26 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+/// Compile-time embedded Telegram API ID.
+/// Set via `TGCRYPTFS_DEFAULT_API_ID` environment variable at build time.
+/// This allows building releases with embedded credentials for usage tracking.
+/// Users can still override at runtime with `TELEGRAM_APP_ID` environment variable.
+pub const EMBEDDED_API_ID: Option<&str> = option_env!("TGCRYPTFS_DEFAULT_API_ID");
+
+/// Compile-time embedded Telegram API Hash.
+/// Set via `TGCRYPTFS_DEFAULT_API_HASH` environment variable at build time.
+/// This allows building releases with embedded credentials for usage tracking.
+/// Users can still override at runtime with `TELEGRAM_APP_HASH` environment variable.
+pub const EMBEDDED_API_HASH: Option<&str> = option_env!("TGCRYPTFS_DEFAULT_API_HASH");
+
+/// Check if this binary has embedded Telegram API credentials.
+///
+/// Returns true if both API ID and API Hash were set at compile time.
+/// This can be used to inform users whether they need to provide their own credentials.
+pub fn has_embedded_credentials() -> bool {
+    EMBEDDED_API_ID.is_some() && EMBEDDED_API_HASH.is_some()
+}
+
 /// Default chunk size: 50MB (safe margin under cloud storage limit)
 pub const DEFAULT_CHUNK_SIZE: usize = 50 * 1024 * 1024;
 
@@ -460,9 +480,17 @@ impl Default for Config {
 
 impl Default for TelegramConfig {
     fn default() -> Self {
+        // Use compile-time embedded API credentials if available
+        let api_id = EMBEDDED_API_ID
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0);
+        let api_hash = EMBEDDED_API_HASH
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
         TelegramConfig {
-            api_id: 0,
-            api_hash: String::new(),
+            api_id,
+            api_hash,
             phone: None,
             session_file: PathBuf::from("tgcryptfs.session"),
             max_concurrent_uploads: 3,
@@ -563,14 +591,14 @@ impl Config {
         }
 
         // Cache settings
-        if let Ok(cache_size) = std::env::var("TELEGRAMFS_CACHE_SIZE") {
+        if let Ok(cache_size) = std::env::var("TGCRYPTFS_CACHE_SIZE") {
             if let Ok(size) = cache_size.trim().parse::<u64>() {
                 self.cache.max_size = size;
             }
         }
 
         // Chunk settings
-        if let Ok(chunk_size) = std::env::var("TELEGRAMFS_CHUNK_SIZE") {
+        if let Ok(chunk_size) = std::env::var("TGCRYPTFS_CHUNK_SIZE") {
             if let Ok(size) = chunk_size.trim().parse::<usize>() {
                 self.chunk.chunk_size = size;
             }
@@ -578,20 +606,34 @@ impl Config {
     }
 
     /// Create a new config from environment variables only (for init without existing config)
+    ///
+    /// API credentials are resolved in this order:
+    /// 1. Runtime environment variables (TELEGRAM_APP_ID, TELEGRAM_APP_HASH)
+    /// 2. Compile-time embedded credentials (TGCRYPTFS_DEFAULT_API_ID, TGCRYPTFS_DEFAULT_API_HASH)
+    ///
+    /// If neither are available, an error is returned.
     pub fn from_env() -> Result<Self> {
         let mut config = Config::default();
         config.apply_env_overrides();
 
-        // For from_env, we require API credentials
+        // Check if API credentials are available (either embedded or from env)
         if config.telegram.api_id == 0 {
-            return Err(Error::InvalidConfig(
-                "TELEGRAM_APP_ID environment variable is required".to_string(),
-            ));
+            let msg = if EMBEDDED_API_ID.is_none() {
+                "Telegram API credentials required. Set TELEGRAM_APP_ID environment variable \
+                 or get your API credentials from https://my.telegram.org/apps"
+            } else {
+                "TELEGRAM_APP_ID environment variable is required (embedded default is invalid)"
+            };
+            return Err(Error::InvalidConfig(msg.to_string()));
         }
         if config.telegram.api_hash.is_empty() {
-            return Err(Error::InvalidConfig(
-                "TELEGRAM_APP_HASH environment variable is required".to_string(),
-            ));
+            let msg = if EMBEDDED_API_HASH.is_none() {
+                "Telegram API credentials required. Set TELEGRAM_APP_HASH environment variable \
+                 or get your API credentials from https://my.telegram.org/apps"
+            } else {
+                "TELEGRAM_APP_HASH environment variable is required (embedded default is invalid)"
+            };
+            return Err(Error::InvalidConfig(msg.to_string()));
         }
 
         Ok(config)
@@ -898,7 +940,7 @@ impl ConfigV2 {
             config.telegram.phone = Some(phone.trim().to_string());
         }
 
-        if let Ok(machine_name) = std::env::var("TELEGRAMFS_MACHINE_NAME") {
+        if let Ok(machine_name) = std::env::var("TGCRYPTFS_MACHINE_NAME") {
             config.machine.name = machine_name.trim().to_string();
         }
 

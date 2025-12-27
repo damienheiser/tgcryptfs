@@ -1,4 +1,4 @@
-//! Machine identity management for distributed TelegramFS
+//! Machine identity management for distributed tgcryptfs
 
 use crate::config::EncryptionConfig;
 use crate::crypto::derive_key;
@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use uuid::Uuid;
 
-/// Machine identity for distributed TelegramFS
+/// Machine identity for distributed tgcryptfs
 ///
-/// Each TelegramFS instance has a unique identity that persists across restarts.
+/// Each tgcryptfs instance has a unique identity that persists across restarts.
 /// The identity includes a machine-specific encryption key derived from the master
 /// password and the machine ID.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ impl MachineIdentity {
     ///
     /// This ensures each machine has its own encryption key even with the same master password
     fn derive_machine_key(master_key: &[u8; 32], machine_id: Uuid, config: &EncryptionConfig) -> Result<[u8; 32]> {
-        let context = format!("telegramfs-machine-{}", machine_id);
+        let context = format!("tgcryptfs-machine-{}", machine_id);
         let derived = derive_key(master_key, Some(context.as_bytes()), config)?;
         let mut key = [0u8; 32];
         key.copy_from_slice(derived.key());
@@ -312,7 +312,7 @@ mod tests {
         let identity = MachineIdentity::generate("test-machine".to_string(), &master_key, &config)
             .expect("Failed to generate identity");
 
-        let data = b"Hello, TelegramFS!";
+        let data = b"Hello, tgcryptfs!";
         let signature = identity.sign(data).expect("Failed to sign data");
 
         assert!(identity.verify(data, &signature));
