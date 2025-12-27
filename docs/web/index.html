@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tgcryptfs - Encrypted Cloud Filesystem</title>
+    <meta name="description" content="An encrypted FUSE filesystem with cloud backend storage, providing unlimited storage with end-to-end encryption.">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --fg: #c9d1d9;
+            --accent: #58a6ff;
+            --accent-hover: #79b8ff;
+            --code-bg: #161b22;
+            --border: #30363d;
+            --success: #3fb950;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+        header {
+            text-align: center;
+            padding: 4rem 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--accent), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .tagline {
+            font-size: 1.25rem;
+            opacity: 0.8;
+            margin-bottom: 2rem;
+        }
+        .buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg);
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary {
+            border: 1px solid var(--border);
+            color: var(--fg);
+        }
+        .btn-secondary:hover { border-color: var(--accent); }
+        section { padding: 3rem 0; border-bottom: 1px solid var(--border); }
+        h2 { font-size: 1.75rem; margin-bottom: 1.5rem; color: var(--accent); }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+        .feature {
+            background: var(--code-bg);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .feature h3 { margin-bottom: 0.5rem; color: var(--success); }
+        pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            margin: 1rem 0;
+        }
+        code { font-family: 'SF Mono', Monaco, 'Courier New', monospace; }
+        .inline-code {
+            background: var(--code-bg);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .downloads {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .download-item {
+            background: var(--code-bg);
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+        .download-item a { color: var(--accent); text-decoration: none; }
+        .download-item a:hover { text-decoration: underline; }
+        .architecture {
+            background: var(--code-bg);
+            padding: 1.5rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.4;
+        }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            opacity: 0.7;
+        }
+        a { color: var(--accent); }
+        @media (max-width: 600px) {
+            h1 { font-size: 2rem; }
+            header { padding: 2rem 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>tgcryptfs</h1>
+        <p class="tagline">Encrypted cloud-backed filesystem with end-to-end encryption</p>
+        <div class="buttons">
+            <a href="https://github.com/damienheiser/tgcryptfs/releases/latest" class="btn btn-primary">Download</a>
+            <a href="https://github.com/damienheiser/tgcryptfs" class="btn btn-secondary">View on GitHub</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <section>
+            <h2>Features</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>End-to-End Encryption</h3>
+                    <p>AES-256-GCM encryption with Argon2id key derivation. Your data is encrypted before it leaves your machine.</p>
+                </div>
+                <div class="feature">
+                    <h3>FUSE Filesystem</h3>
+                    <p>Mount and use like any normal directory. Works with all your existing applications.</p>
+                </div>
+                <div class="feature">
+                    <h3>Content Deduplication</h3>
+                    <p>BLAKE3 content-addressed storage. Identical data is stored only once.</p>
+                </div>
+                <div class="feature">
+                    <h3>LZ4 Compression</h3>
+                    <p>Fast compression for compressible data. Only applied when beneficial.</p>
+                </div>
+                <div class="feature">
+                    <h3>Distributed Mode</h3>
+                    <p>CRDT-based multi-machine sync with automatic conflict resolution.</p>
+                </div>
+                <div class="feature">
+                    <h3>Snapshots</h3>
+                    <p>Point-in-time filesystem snapshots with easy restore.</p>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Quick Start</h2>
+            <pre><code># Install (macOS ARM64)
+curl -L https://github.com/damienheiser/tgcryptfs/releases/latest/download/tgcryptfs-macos-aarch64 -o tgcryptfs
+chmod +x tgcryptfs
+sudo mv tgcryptfs /usr/local/bin/
+
+# Initialize with your Telegram API credentials
+tgcryptfs init --api-id YOUR_API_ID --api-hash YOUR_API_HASH
+
+# Authenticate
+tgcryptfs auth --phone +1234567890
+
+# Mount
+mkdir -p ~/tgcryptfs
+tgcryptfs mount ~/tgcryptfs
+
+# Use it!
+cp ~/Documents/* ~/tgcryptfs/</code></pre>
+        </section>
+
+        <section>
+            <h2>Downloads</h2>
+            <div class="downloads">
+                <div class="download-item">
+                    <strong>macOS (Apple Silicon)</strong><br>
+                    <a href="https://github.com/damienheiser/tgcryptfs/releases/latest/download/tgcryptfs-macos-aarch64">tgcryptfs-macos-aarch64</a>
+                </div>
+                <div class="download-item">
+                    <strong>Linux (x86_64)</strong><br>
+                    <a href="https://github.com/damienheiser/tgcryptfs/releases/latest/download/tgcryptfs-linux-x86_64">tgcryptfs-linux-x86_64</a>
+                </div>
+                <div class="download-item">
+                    <strong>Linux (ARM64/Asahi)</strong><br>
+                    <a href="https://github.com/damienheiser/tgcryptfs/releases/latest/download/tgcryptfs-linux-aarch64">tgcryptfs-linux-aarch64</a>
+                </div>
+            </div>
+            <p style="margin-top: 1rem; text-align: center;">
+                <a href="https://github.com/damienheiser/tgcryptfs/releases/latest/download/SHA256SUMS">SHA256 Checksums</a>
+            </p>
+        </section>
+
+        <section>
+            <h2>Security Model</h2>
+            <div class="architecture">Password
+    |
+    +--&gt; Argon2id --&gt; Master Key
+                          |
+                          +--&gt; HKDF --&gt; Metadata Key (encrypts filesystem metadata)
+                          |
+                          +--&gt; HKDF --&gt; Chunk Keys (per-chunk encryption keys)
+                          |
+                          +--&gt; HKDF --&gt; Machine Key (per-machine derived key)</div>
+            <p style="margin-top: 1rem;">The cloud backend only sees encrypted blobs. It cannot read your files, see filenames, or know your directory structure.</p>
+        </section>
+
+        <section>
+            <h2>Building from Source</h2>
+            <pre><code># Prerequisites: Rust 1.70+, FUSE libraries
+# Linux: sudo apt-get install libfuse3-dev
+# macOS: brew install macfuse
+
+git clone https://github.com/damienheiser/tgcryptfs.git
+cd tgcryptfs
+cargo build --release
+sudo cp target/release/tgcryptfs /usr/local/bin/</code></pre>
+        </section>
+    </div>
+
+    <footer>
+        <p>MIT License &middot; <a href="https://github.com/damienheiser/tgcryptfs">GitHub</a> &middot; <a href="https://github.com/damienheiser/tgcryptfs/issues">Issues</a></p>
+    </footer>
+</body>
+</html>

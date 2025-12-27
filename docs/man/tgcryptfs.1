@@ -1,0 +1,206 @@
+.\" Man page for tgcryptfs
+.TH TGCRYPTFS 1 "December 2025" "tgcryptfs 2.0" "User Commands"
+.SH NAME
+tgcryptfs \- encrypted cloud-backed filesystem using FUSE
+.SH SYNOPSIS
+.B tgcryptfs
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+.B tgcryptfs
+is an encrypted FUSE filesystem that stores data in the cloud.
+All files are encrypted locally using AES-256-GCM before being uploaded,
+chunked into manageable pieces, compressed with LZ4, and deduplicated
+using content-addressable storage.
+.PP
+Your data remains encrypted end-to-end \(em the cloud backend only sees
+encrypted blobs.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-config " " \fIPATH\fR
+Configuration file path. Default: ~/.config/tgcryptfs/config.json
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose logging output.
+.TP
+.BR \-h ", " \-\-help
+Print help information.
+.TP
+.BR \-V ", " \-\-version
+Print version information.
+.SH COMMANDS
+.SS init
+Initialize a new tgcryptfs configuration.
+.PP
+.B tgcryptfs init
+\-\-api-id \fIID\fR \-\-api-hash \fIHASH\fR [\-\-phone \fIPHONE\fR]
+.TP
+.BR \-\-api-id " " \fIID\fR
+Telegram API ID (get from my.telegram.org)
+.TP
+.BR \-\-api-hash " " \fIHASH\fR
+Telegram API hash
+.TP
+.BR \-\-phone " " \fIPHONE\fR
+Phone number for authentication (optional)
+.SS auth
+Authenticate with the cloud backend.
+.PP
+.B tgcryptfs auth
+\-\-phone \fIPHONE\fR [\-\-code \fICODE\fR] [\-\-password \fIPASS\fR]
+.TP
+.BR \-\-phone " " \fIPHONE\fR
+Phone number in international format (e.g., +1234567890)
+.TP
+.BR \-\-code " " \fICODE\fR
+Login code (will prompt if not provided)
+.TP
+.BR \-\-password " " \fIPASS\fR
+2FA password if enabled on account
+.SS mount
+Mount the encrypted filesystem.
+.PP
+.B tgcryptfs mount
+\fIMOUNT_POINT\fR [\fIOPTIONS\fR]
+.TP
+.BR \-f ", " \-\-foreground
+Run in foreground (don't daemonize)
+.TP
+.BR \-\-password-file " " \fIPATH\fR
+Read encryption password from file (for automated mounting)
+.SS unmount
+Unmount the filesystem.
+.PP
+.B tgcryptfs unmount
+\fIMOUNT_POINT\fR
+.SS status
+Show filesystem and connection status.
+.PP
+.B tgcryptfs status
+.SS snapshot
+Create a named snapshot of the filesystem.
+.PP
+.B tgcryptfs snapshot
+\fINAME\fR [\-\-description \fIDESC\fR]
+.SS snapshots
+List all available snapshots.
+.PP
+.B tgcryptfs snapshots
+.SS restore
+Restore from a snapshot.
+.PP
+.B tgcryptfs restore
+\fINAME\fR
+.SS cache
+Manage local cache.
+.PP
+.B tgcryptfs cache
+[\-\-clear]
+.TP
+.BR \-\-clear
+Clear the local chunk cache
+.SS sync
+Synchronize local state with cloud storage.
+.PP
+.B tgcryptfs sync
+.SH ENVIRONMENT
+.TP
+.B TELEGRAM_APP_ID
+Telegram API ID (overrides config file)
+.TP
+.B TELEGRAM_APP_HASH
+Telegram API hash (overrides config file)
+.TP
+.B TELEGRAM_PHONE
+Phone number for authentication
+.TP
+.B TGCRYPTFS_CACHE_SIZE
+Maximum cache size in bytes
+.TP
+.B TGCRYPTFS_CHUNK_SIZE
+Chunk size in bytes (default: 50MB)
+.TP
+.B TGCRYPTFS_MACHINE_NAME
+Machine name for distributed mode
+.SH FILES
+.TP
+.I ~/.config/tgcryptfs/config.json
+Default configuration file
+.TP
+.I ~/.tgcryptfs/session
+Telegram session file
+.TP
+.I ~/.tgcryptfs/cache/
+Local chunk cache directory
+.SH SECURITY
+.B tgcryptfs
+uses the following cryptographic primitives:
+.IP \(bu 2
+\fBKey Derivation:\fR Argon2id with configurable memory/time/parallelism
+.IP \(bu 2
+\fBEncryption:\fR AES-256-GCM (authenticated encryption)
+.IP \(bu 2
+\fBHashing:\fR BLAKE3 for content-addressing and deduplication
+.IP \(bu 2
+\fBSigning:\fR Ed25519 for distributed operations
+.PP
+All data is encrypted locally before upload. The cloud backend
+only stores encrypted blobs with random-looking filenames.
+.SH EXAMPLES
+.PP
+Initialize with API credentials:
+.RS
+.nf
+tgcryptfs init --api-id 12345678 --api-hash abc123def456
+.fi
+.RE
+.PP
+Authenticate:
+.RS
+.nf
+tgcryptfs auth --phone +1234567890
+.fi
+.RE
+.PP
+Mount the filesystem:
+.RS
+.nf
+tgcryptfs mount /mnt/tgcryptfs
+.fi
+.RE
+.PP
+Mount with password file (for scripts):
+.RS
+.nf
+tgcryptfs mount /mnt/tgcryptfs --password-file /etc/tgcryptfs/password
+.fi
+.RE
+.PP
+Create a snapshot:
+.RS
+.nf
+tgcryptfs snapshot backup-2025-01
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Successful execution
+.TP
+.B 1
+General error
+.TP
+.B 2
+Configuration error
+.TP
+.B 3
+Authentication error
+.SH SEE ALSO
+.BR fuse (8),
+.BR fusermount (1),
+.BR mount (8)
+.SH BUGS
+Report bugs at: https://github.com/damienheiser/tgcryptfs/issues
+.SH AUTHORS
+tgcryptfs Contributors
+.SH COPYRIGHT
+MIT License - see LICENSE for details.
