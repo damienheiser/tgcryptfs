@@ -83,9 +83,9 @@ Parameters are configurable:
 ```
 Master Key
     │
-    ├──► HKDF("tgcryptfs-metadata-v1") ──► Metadata Key
+    ├──► HKDF("telegramfs-metadata-v1") ──► Metadata Key
     │
-    └──► HKDF("tgcryptfs-chunk-v1:<chunk_id>") ──► Per-Chunk Key
+    └──► HKDF("telegramfs-chunk-v1:<chunk_id>") ──► Per-Chunk Key
 ```
 
 Each chunk gets a unique encryption key derived from the master key and chunk ID, providing key separation.

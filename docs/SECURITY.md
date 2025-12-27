@@ -80,8 +80,8 @@ tgcryptfs is designed to achieve the following security properties:
 
 **Purpose-specific derivation**:
 ```
-Metadata Key = HKDF(Master Key, salt, "tgcryptfs-metadata-v1")
-Chunk Key    = HKDF(Master Key, salt, "tgcryptfs-chunk-v1:<chunk_id>")
+Metadata Key = HKDF(Master Key, salt, "telegramfs-metadata-v1")
+Chunk Key    = HKDF(Master Key, salt, "telegramfs-chunk-v1:<chunk_id>")
 ```
 
 **Why per-chunk keys?**
