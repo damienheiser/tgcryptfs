@@ -1,4 +1,4 @@
-//! Key Management for TelegramFS
+//! Key Management for tgcryptfs
 //!
 //! Implements a hierarchical key structure:
 //! - Master Key: Derived from user password, protects metadata key and chunk keys
@@ -73,7 +73,7 @@ impl MasterKey {
 
     /// Derive the metadata encryption key
     pub fn metadata_key(&self) -> Result<[u8; KEY_SIZE]> {
-        self.derive_subkey(b"telegramfs-metadata-v1")
+        self.derive_subkey(b"tgcryptfs-metadata-v1")
     }
 }
 
@@ -92,7 +92,7 @@ pub struct ChunkKey {
 impl ChunkKey {
     /// Derive a chunk key from master key and chunk ID
     pub fn derive(master: &MasterKey, chunk_id: &str) -> Result<Self> {
-        let purpose = format!("telegramfs-chunk-v1:{}", chunk_id);
+        let purpose = format!("tgcryptfs-chunk-v1:{}", chunk_id);
         let key = master.derive_subkey(purpose.as_bytes())?;
 
         Ok(ChunkKey {

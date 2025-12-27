@@ -1,4 +1,4 @@
-//! Cryptography module for TelegramFS
+//! Cryptography module for tgcryptfs
 //!
 //! Provides AES-256-GCM encryption with Argon2id key derivation.
 //! All data is encrypted before leaving the local system.

@@ -1,10 +1,10 @@
-# TelegramFS Architecture
+# tgcryptfs Architecture
 
-This document describes the internal architecture of TelegramFS, a FUSE-based encrypted filesystem backed by Telegram's Saved Messages.
+This document describes the internal architecture of tgcryptfs, a FUSE-based encrypted filesystem backed by Telegram's Saved Messages.
 
 ## System Overview
 
-TelegramFS is structured as a layered system where each layer has clear responsibilities:
+tgcryptfs is structured as a layered system where each layer has clear responsibilities:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -16,7 +16,7 @@ TelegramFS is structured as a layered system where each layer has clear responsi
 │                     FUSE Filesystem Layer                        │
 │                      (fs/filesystem.rs)                          │
 │                                                                  │
-│  Translates POSIX operations → TelegramFS operations            │
+│  Translates POSIX operations → tgcryptfs operations            │
 └─────────────────────────────────────────────────────────────────┘
          │                    │                    │
          ▼                    ▼                    ▼
@@ -83,9 +83,9 @@ Parameters are configurable:
 ```
 Master Key
     │
-    ├──► HKDF("telegramfs-metadata-v1") ──► Metadata Key
+    ├──► HKDF("tgcryptfs-metadata-v1") ──► Metadata Key
     │
-    └──► HKDF("telegramfs-chunk-v1:<chunk_id>") ──► Per-Chunk Key
+    └──► HKDF("tgcryptfs-chunk-v1:<chunk_id>") ──► Per-Chunk Key
 ```
 
 Each chunk gets a unique encryption key derived from the master key and chunk ID, providing key separation.
@@ -220,7 +220,7 @@ Token bucket rate limiting with:
 
 FUSE implementation:
 
-#### TelegramFs (`filesystem.rs`)
+#### TgCryptFs (`filesystem.rs`)
 Implements `fuser::Filesystem` trait:
 - **lookup**: Resolve path component
 - **getattr/setattr**: Attribute operations

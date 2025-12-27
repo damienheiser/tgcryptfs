@@ -1,4 +1,4 @@
-//! Core types for distributed TelegramFS
+//! Core types for distributed tgcryptfs
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

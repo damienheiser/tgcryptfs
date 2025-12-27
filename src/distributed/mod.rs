@@ -1,4 +1,4 @@
-//! Distributed infrastructure for TelegramFS
+//! Distributed infrastructure for tgcryptfs
 //!
 //! This module provides support for multiple distribution modes:
 //! - Standalone: Single machine, independent filesystem
