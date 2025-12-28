@@ -73,8 +73,8 @@ impl MasterKey {
 
     /// Derive the metadata encryption key
     pub fn metadata_key(&self) -> Result<[u8; KEY_SIZE]> {
-        // Keep legacy HKDF purpose string for backward compatibility with existing data
-        self.derive_subkey(b"telegramfs-metadata-v1")
+        // Use new HKDF purpose string (data migrated from telegramfs-* to tgcryptfs-*)
+        self.derive_subkey(b"tgcryptfs-metadata-v1")
     }
 }
 
@@ -93,8 +93,8 @@ pub struct ChunkKey {
 impl ChunkKey {
     /// Derive a chunk key from master key and chunk ID
     pub fn derive(master: &MasterKey, chunk_id: &str) -> Result<Self> {
-        // Keep legacy HKDF purpose string for backward compatibility with existing data
-        let purpose = format!("telegramfs-chunk-v1:{}", chunk_id);
+        // Use new HKDF purpose string (data migrated from telegramfs-* to tgcryptfs-*)
+        let purpose = format!("tgcryptfs-chunk-v1:{}", chunk_id);
         let key = master.derive_subkey(purpose.as_bytes())?;
 
         Ok(ChunkKey {
