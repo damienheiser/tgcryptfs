@@ -2,16 +2,18 @@
 //!
 //! Tracks deleted files and opaque directories to hide lower layer entries.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-/// Prefix for whiteout entries in sled
+/// Prefix for whiteout entries in sled (reserved for future prefix-based keys)
+#[allow(dead_code)]
 const WHITEOUT_PREFIX: &[u8] = b"wo:";
-/// Prefix for opaque directory markers
+/// Prefix for opaque directory markers (reserved for future prefix-based keys)
+#[allow(dead_code)]
 const OPAQUE_PREFIX: &[u8] = b"op:";
 
 /// Tracks deleted files and opaque directories

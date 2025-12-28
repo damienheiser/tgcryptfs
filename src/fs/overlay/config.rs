@@ -9,6 +9,9 @@ pub struct OverlayConfig {
     /// Path to the lower (read-only) layer
     pub lower_path: PathBuf,
 
+    /// Path to the upper (writable) layer
+    pub upper_path: PathBuf,
+
     /// Path to whiteout database
     pub whiteout_db_path: PathBuf,
 
@@ -49,6 +52,7 @@ impl Default for OverlayConfig {
 
         OverlayConfig {
             lower_path: home,
+            upper_path: data_dir.join("overlay_upper"),
             whiteout_db_path: data_dir.join("overlay_whiteout.db"),
             conflict_behavior: ConflictBehavior::UpperWins,
             follow_symlinks: true,
@@ -72,6 +76,15 @@ impl OverlayConfig {
     pub fn with_lower_path(lower_path: PathBuf) -> Self {
         Self {
             lower_path,
+            ..Default::default()
+        }
+    }
+
+    /// Create config with specified lower and upper paths
+    pub fn with_paths(lower_path: PathBuf, upper_path: PathBuf) -> Self {
+        Self {
+            lower_path,
+            upper_path,
             ..Default::default()
         }
     }
