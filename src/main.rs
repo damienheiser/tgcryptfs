@@ -13,7 +13,7 @@ use tgcryptfs::{
     cache::ChunkCache,
     config::Config,
     crypto::{KeyManager, MasterKey},
-    fs::TgCryptFs,
+    fs::{overlay::{OverlayConfig, OverlayFs}, TgCryptFs},
     metadata::MetadataStore,
     telegram::TelegramBackend,
     Error, Result,
@@ -87,6 +87,14 @@ enum Commands {
         /// Read encryption password from file
         #[arg(long)]
         password_file: Option<PathBuf>,
+
+        /// Enable overlay mode (lower layer read-only, writes go to upper layer)
+        #[arg(long)]
+        overlay: bool,
+
+        /// Lower layer path for overlay mode (defaults to home directory)
+        #[arg(long)]
+        lower_path: Option<PathBuf>,
     },
 
     /// Unmount the filesystem
@@ -264,7 +272,9 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
             foreground,
             allow_other,
             password_file,
-        } => cmd_mount(config_path, &mount_point, foreground, allow_other, password_file),
+            overlay,
+            lower_path,
+        } => cmd_mount(config_path, &mount_point, foreground, allow_other, password_file, overlay, lower_path),
 
         Commands::Unmount { mount_point } => cmd_unmount(&mount_point),
 
@@ -433,61 +443,12 @@ fn cmd_mount(
     foreground: bool,
     allow_other: bool,
     password_file: Option<PathBuf>,
+    overlay: bool,
+    lower_path: Option<PathBuf>,
 ) -> Result<()> {
     let mut config = Config::load(config_path)?;
     config.mount.mount_point = mount_point.clone();
     config.mount.allow_other = allow_other;
-
-    info!("Starting tgcryptfs...");
-
-    // Get password for key derivation
-    let password = if let Some(path) = password_file {
-        std::fs::read_to_string(&path)
-            .map_err(|e| Error::Internal(format!("Failed to read password file: {}", e)))?
-            .trim()
-            .to_string()
-    } else {
-        rpassword::prompt_password("Enter encryption password: ")
-            .map_err(|e| Error::Internal(e.to_string()))?
-    };
-
-    // Derive master key
-    let master_key = MasterKey::from_password(password.as_bytes(), &config.encryption)?;
-    let key_manager = KeyManager::new(master_key)?;
-
-    // Update config with salt if new
-    if config.encryption.salt.is_empty() {
-        config.encryption.salt = key_manager.salt().to_vec();
-        config.save(config_path)?;
-    }
-
-    // Create metadata store
-    let metadata_path = config.data_dir.join("metadata.db");
-    let metadata = MetadataStore::open(&metadata_path, *key_manager.metadata_key())?;
-
-    // Create Telegram backend
-    let telegram = TelegramBackend::new(config.telegram.clone());
-
-    // Connect to Telegram
-    let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Internal(e.to_string()))?;
-    runtime.block_on(async {
-        telegram.connect().await?;
-        if !telegram.is_authorized().await? {
-            return Err(Error::TelegramAuthRequired);
-        }
-        Ok::<_, Error>(())
-    })?;
-
-    // Create cache
-    let cache = ChunkCache::new(&config.cache)?;
-
-    // Create filesystem
-    let fs = TgCryptFs::new(config.clone(), key_manager, metadata, telegram, cache)?;
-
-    // Ensure mount point exists
-    std::fs::create_dir_all(mount_point)?;
-
-    info!("Mounting at {:?}", mount_point);
 
     // Build mount options
     let mut options = vec![
@@ -499,16 +460,94 @@ fn cmd_mount(
         options.push(fuser::MountOption::AllowOther);
     }
 
-    if foreground {
-        // Mount in foreground
-        fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
-    } else {
-        // Daemonize
-        info!("Daemonizing... Use 'tgcryptfs unmount {:?}' to unmount", mount_point);
+    // Ensure mount point exists
+    std::fs::create_dir_all(mount_point)?;
 
-        // For proper daemonization, you'd use a crate like `daemonize`
-        // For now, just run in foreground
-        fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
+    if overlay {
+        // Overlay mode: local lower layer + local upper layer
+        info!("Starting tgcryptfs in OVERLAY mode...");
+
+        let lower = lower_path.unwrap_or_else(|| {
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+        });
+
+        let overlay_config = OverlayConfig::with_lower_path(lower.clone());
+
+        info!("Lower layer (read-only): {:?}", lower);
+        info!("Upper layer (writable): {:?}", overlay_config.upper_path);
+        info!("Whiteout DB: {:?}", overlay_config.whiteout_db_path);
+
+        // Create upper layer directory
+        std::fs::create_dir_all(&overlay_config.upper_path)?;
+
+        // Create overlay filesystem
+        let fs = OverlayFs::new(overlay_config)
+            .map_err(|e| Error::Internal(format!("Failed to create overlay: {}", e)))?;
+
+        info!("Mounting overlay at {:?}", mount_point);
+
+        if foreground {
+            fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
+        } else {
+            info!("Daemonizing... Use 'tgcryptfs unmount {:?}' to unmount", mount_point);
+            fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
+        }
+    } else {
+        // Standard mode: Telegram-backed filesystem
+        info!("Starting tgcryptfs...");
+
+        // Get password for key derivation
+        let password = if let Some(path) = password_file {
+            std::fs::read_to_string(&path)
+                .map_err(|e| Error::Internal(format!("Failed to read password file: {}", e)))?
+                .trim()
+                .to_string()
+        } else {
+            rpassword::prompt_password("Enter encryption password: ")
+                .map_err(|e| Error::Internal(e.to_string()))?
+        };
+
+        // Derive master key
+        let master_key = MasterKey::from_password(password.as_bytes(), &config.encryption)?;
+        let key_manager = KeyManager::new(master_key)?;
+
+        // Update config with salt if new
+        if config.encryption.salt.is_empty() {
+            config.encryption.salt = key_manager.salt().to_vec();
+            config.save(config_path)?;
+        }
+
+        // Create metadata store
+        let metadata_path = config.data_dir.join("metadata.db");
+        let metadata = MetadataStore::open(&metadata_path, *key_manager.metadata_key())?;
+
+        // Create Telegram backend
+        let telegram = TelegramBackend::new(config.telegram.clone());
+
+        // Connect to Telegram
+        let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Internal(e.to_string()))?;
+        runtime.block_on(async {
+            telegram.connect().await?;
+            if !telegram.is_authorized().await? {
+                return Err(Error::TelegramAuthRequired);
+            }
+            Ok::<_, Error>(())
+        })?;
+
+        // Create cache
+        let cache = ChunkCache::new(&config.cache)?;
+
+        // Create filesystem
+        let fs = TgCryptFs::new(config.clone(), key_manager, metadata, telegram, cache)?;
+
+        info!("Mounting at {:?}", mount_point);
+
+        if foreground {
+            fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
+        } else {
+            info!("Daemonizing... Use 'tgcryptfs unmount {:?}' to unmount", mount_point);
+            fuser::mount2(fs, mount_point, &options).map_err(|e| Error::Internal(e.to_string()))?;
+        }
     }
 
     Ok(())
