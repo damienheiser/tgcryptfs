@@ -89,8 +89,8 @@ impl MachineIdentity {
     ///
     /// This ensures each machine has its own encryption key even with the same master password
     fn derive_machine_key(master_key: &[u8; 32], machine_id: Uuid, config: &EncryptionConfig) -> Result<[u8; 32]> {
-        // Keep legacy HKDF purpose string for backward compatibility with existing data
-        let context = format!("telegramfs-machine-{}", machine_id);
+        // Use new HKDF purpose string (data migrated from telegramfs-* to tgcryptfs-*)
+        let context = format!("tgcryptfs-machine-{}", machine_id);
         let derived = derive_key(master_key, Some(context.as_bytes()), config)?;
         let mut key = [0u8; 32];
         key.copy_from_slice(derived.key());
