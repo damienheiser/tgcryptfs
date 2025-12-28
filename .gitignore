@@ -24,3 +24,18 @@ cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Build artifacts and dist
+dist/
+
+# Sensitive docs (contain usernames/paths)
+docs/RECOVERY.md
+docs/DEPLOYMENT.md
+TELEGRAM_IMPLEMENTATION.md
