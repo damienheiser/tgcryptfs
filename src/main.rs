@@ -18,7 +18,7 @@ use tgcryptfs::{
     telegram::TelegramBackend,
     Error, Result,
 };
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
@@ -142,6 +142,21 @@ enum Commands {
     /// Cluster management
     #[command(subcommand)]
     Cluster(ClusterCommands),
+
+    /// Migrate HKDF from telegramfs-* to tgcryptfs-*
+    Migrate {
+        /// Read encryption password from file
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+
+        /// Perform a dry run (don't actually modify data)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Force migration even if already migrated
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -270,6 +285,12 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
         Commands::Namespace(namespace_cmd) => run_namespace_command(namespace_cmd, config_path),
 
         Commands::Cluster(cluster_cmd) => run_cluster_command(cluster_cmd, config_path),
+
+        Commands::Migrate {
+            password_file,
+            dry_run,
+            force,
+        } => cmd_migrate(config_path, password_file, dry_run, force),
     }
 }
 
@@ -896,6 +917,126 @@ fn cmd_cluster_status(config_path: &PathBuf) -> Result<()> {
             dist_config.operation_log_retention_hours
         );
     }
+
+    Ok(())
+}
+
+fn cmd_migrate(
+    config_path: &PathBuf,
+    password_file: Option<PathBuf>,
+    dry_run: bool,
+    force: bool,
+) -> Result<()> {
+    use tgcryptfs::migration::{detect_hkdf_version, migrate_metadata_db, HkdfMigration, HkdfVersion};
+
+    let config = Config::load(config_path)?;
+
+    info!("Starting HKDF migration...");
+    if dry_run {
+        info!("DRY RUN MODE - no changes will be made");
+    }
+
+    // Get password
+    let password = if let Some(path) = password_file {
+        std::fs::read_to_string(&path)
+            .map_err(|e| Error::Internal(format!("Failed to read password file: {}", e)))?
+            .trim()
+            .to_string()
+    } else {
+        rpassword::prompt_password("Enter encryption password: ")
+            .map_err(|e| Error::Internal(e.to_string()))?
+    };
+
+    // Derive master key
+    let master_key = MasterKey::from_password(password.as_bytes(), &config.encryption)?;
+
+    // Get salt from config
+    if config.encryption.salt.is_empty() {
+        return Err(Error::InvalidConfig("No salt in configuration - filesystem not initialized".to_string()));
+    }
+
+    let salt_bytes: [u8; 32] = config.encryption.salt.as_slice()
+        .try_into()
+        .map_err(|_| Error::InvalidConfig("Invalid salt length".to_string()))?;
+
+    // Create migration context
+    let migration = HkdfMigration::new(master_key.key(), &salt_bytes)?;
+
+    // Open metadata database to check current version
+    let metadata_path = config.data_dir.join("metadata.db");
+
+    if !metadata_path.exists() {
+        return Err(Error::Internal("Metadata database not found - nothing to migrate".to_string()));
+    }
+
+    // Check current HKDF version by sampling a metadata entry
+    let db = sled::open(&metadata_path)?;
+
+    // Find the inodes tree
+    let inodes_tree = db.open_tree("inodes")?;
+
+    // Get a sample entry to detect version
+    if let Some(first) = inodes_tree.first()?
+    {
+        let (_, value) = first;
+        let version = detect_hkdf_version(
+            &value,
+            migration.old_metadata_key(),
+            migration.new_metadata_key(),
+        );
+
+        println!("Current HKDF version: {}", version);
+
+        match version {
+            HkdfVersion::New => {
+                if !force {
+                    println!("Data is already using new HKDF strings. No migration needed.");
+                    println!("Use --force to re-migrate anyway.");
+                    return Ok(());
+                }
+                println!("Force mode: re-migrating data...");
+            }
+            HkdfVersion::Old => {
+                println!("Data is using old HKDF strings. Migration required.");
+            }
+            HkdfVersion::Unknown => {
+                return Err(Error::Decryption(
+                    "Cannot decrypt data with either old or new keys. Wrong password?".to_string()
+                ));
+            }
+        }
+    } else {
+        println!("No inode entries found in database.");
+        return Ok(());
+    }
+
+    // Close the db before migration
+    drop(inodes_tree);
+    drop(db);
+
+    if dry_run {
+        println!("\nDry run complete. Would migrate:");
+        println!("  - Metadata database at {:?}", metadata_path);
+        println!("\nRun without --dry-run to perform the actual migration.");
+        return Ok(());
+    }
+
+    // Perform metadata migration
+    println!("\nMigrating metadata database...");
+    let stats = migrate_metadata_db(&metadata_path, &migration)?;
+
+    println!("\nMigration complete!");
+    println!("  Entries migrated: {}", stats.entries_migrated);
+    println!("  Entries failed: {}", stats.entries_failed);
+
+    if stats.entries_failed > 0 {
+        warn!("Some entries failed to migrate. Check logs for details.");
+    }
+
+    println!("\nIMPORTANT: After migration, you must:");
+    println!("  1. Update the HKDF strings in src/crypto/keys.rs to use 'tgcryptfs-*'");
+    println!("  2. Rebuild and reinstall tgcryptfs");
+    println!("  3. Test mounting the filesystem");
 
     Ok(())
 }

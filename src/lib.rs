@@ -11,6 +11,7 @@ pub mod distributed;
 pub mod error;
 pub mod fs;
 pub mod metadata;
+pub mod migration;
 pub mod snapshot;
 pub mod telegram;
 
