@@ -24,7 +24,7 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Parser)]
 #[command(name = "tgcryptfs")]
 #[command(author = "tgcryptfs Contributors")]
-#[command(version = "0.1.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Encrypted cloud-backed filesystem")]
 struct Cli {
     /// Configuration file path
