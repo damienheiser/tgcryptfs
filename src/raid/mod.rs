@@ -5,10 +5,12 @@
 
 pub mod config;
 pub mod erasure;
-pub mod stripe;
 pub mod health;
+pub mod pool;
+pub mod stripe;
 
-pub use config::{ErasureConfig, ErasurePreset, AccountConfig, PoolConfig};
+pub use config::{AccountConfig, ErasureConfig, ErasurePreset, PoolConfig};
 pub use erasure::Encoder;
+pub use health::{AccountHealth, AccountStatus, ArrayHealth, ArrayStatus, HealthTracker};
+pub use pool::AccountPool;
 pub use stripe::{Stripe, StripeManager};
-pub use health::{AccountHealth, AccountStatus, ArrayStatus};

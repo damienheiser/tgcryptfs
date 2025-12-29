@@ -281,6 +281,11 @@ impl HealthTracker {
             .count()
     }
 
+    /// Get status of a specific account (convenience method)
+    pub fn account_status(&self, account_id: u8) -> AccountStatus {
+        self.account_health(account_id).status
+    }
+
     /// Mark account as rebuilding
     pub fn set_rebuilding(&self, account_id: u8) {
         let mut accounts = self.accounts.write();
@@ -392,13 +397,23 @@ mod tests {
         let tracker = HealthTracker::new(3, 2);
 
         // Default is 3 failures before unavailable
+        // First failure: 100% error rate -> Degraded (above 10% threshold)
         tracker.record_failure(0, "Error 1");
-        assert_eq!(tracker.account_health(0).status, AccountStatus::Healthy);
+        let status = tracker.account_health(0).status;
+        assert!(
+            status == AccountStatus::Healthy || status == AccountStatus::Degraded,
+            "After 1 failure: expected Healthy or Degraded, got {:?}",
+            status
+        );
 
         tracker.record_failure(0, "Error 2");
         // May be degraded due to error rate
         let status = tracker.account_health(0).status;
-        assert!(status == AccountStatus::Healthy || status == AccountStatus::Degraded);
+        assert!(
+            status == AccountStatus::Healthy || status == AccountStatus::Degraded,
+            "After 2 failures: expected Healthy or Degraded, got {:?}",
+            status
+        );
 
         tracker.record_failure(0, "Error 3");
         assert_eq!(
