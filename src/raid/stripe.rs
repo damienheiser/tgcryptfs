@@ -1,324 +1,291 @@
-//! Stripe management for distributing chunks across accounts
+//! Stripe management for erasure-coded chunks
 //!
-//! A stripe represents a set of chunks (data + parity) derived from a single
-//! data block, distributed across multiple accounts for redundancy.
+//! Handles splitting data into stripes, assigning blocks to accounts,
+//! and reconstructing data from available blocks.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::chunk::{BlockLocation, ChunkId, StripeInfo};
+use crate::error::{Error, Result};
 
-/// A stripe represents chunks from one data block distributed across accounts
-///
-/// Each stripe contains N chunks (K data + parity) that together can
-/// reconstruct the original data block. Any K chunks are sufficient.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use super::erasure::Encoder;
+
+/// A stripe ready for upload or after download
 pub struct Stripe {
-    /// Unique stripe identifier
-    pub stripe_id: u64,
-
-    /// Original data size before encoding
-    pub original_size: u64,
-
-    /// Chunk size in bytes
-    pub chunk_size: usize,
-
-    /// Number of data chunks (K)
-    pub data_chunks: usize,
-
-    /// Total chunks including parity (N)
-    pub total_chunks: usize,
-
-    /// Chunk locations indexed by chunk number (0 to N-1)
-    pub chunks: Vec<ChunkLocation>,
-
-    /// Timestamp when stripe was created (Unix seconds)
-    pub created_at: i64,
-}
-
-/// Location of a chunk within the storage pool
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkLocation {
-    /// Chunk index within the stripe (0 to N-1)
-    pub chunk_index: u8,
-
-    /// Account ID where this chunk is stored
-    pub account_id: u8,
-
-    /// Message ID in the account's Saved Messages
-    pub message_id: Option<i32>,
-
-    /// Whether this is a data chunk (vs parity)
-    pub is_data: bool,
-
-    /// Hash of the chunk data for verification
-    pub hash: Option<String>,
-
-    /// Whether this chunk has been verified as readable
-    pub verified: bool,
-}
-
-impl ChunkLocation {
-    /// Create a new chunk location
-    pub fn new(chunk_index: u8, account_id: u8, is_data: bool) -> Self {
-        ChunkLocation {
-            chunk_index,
-            account_id,
-            message_id: None,
-            is_data,
-            hash: None,
-            verified: false,
-        }
-    }
-
-    /// Set the message ID after upload
-    pub fn with_message_id(mut self, message_id: i32) -> Self {
-        self.message_id = Some(message_id);
-        self
-    }
-
-    /// Set the hash for verification
-    pub fn with_hash(mut self, hash: String) -> Self {
-        self.hash = Some(hash);
-        self
-    }
-
-    /// Mark as verified
-    pub fn mark_verified(mut self) -> Self {
-        self.verified = true;
-        self
-    }
+    /// Chunk ID this stripe belongs to
+    pub chunk_id: ChunkId,
+    /// Block data (index corresponds to block_index)
+    pub blocks: Vec<Vec<u8>>,
+    /// Account assignments for each block
+    pub assignments: Vec<u8>,
+    /// Number of data blocks (K)
+    pub data_count: usize,
 }
 
 impl Stripe {
-    /// Create a new stripe with the given ID and parameters
-    pub fn new(
-        stripe_id: u64,
-        original_size: u64,
-        chunk_size: usize,
-        data_chunks: usize,
-        total_chunks: usize,
-    ) -> Self {
-        Stripe {
-            stripe_id,
-            original_size,
-            chunk_size,
-            data_chunks,
-            total_chunks,
-            chunks: Vec::with_capacity(total_chunks),
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0),
+    /// Get the stripe/chunk ID
+    ///
+    /// Returns the chunk_id for compatibility with pool operations
+    pub fn stripe_id(&self) -> &str {
+        &self.chunk_id
+    }
+
+    /// Get the number of data blocks (K)
+    pub fn data_count(&self) -> u8 {
+        self.data_count as u8
+    }
+
+    /// Get the block assigned to a specific account
+    ///
+    /// Returns `Some((block_index, data))` if this account has a block assignment,
+    /// `None` otherwise.
+    pub fn block_for_account(&self, account_id: u8) -> Option<(u8, &[u8])> {
+        for (block_index, &assigned_account) in self.assignments.iter().enumerate() {
+            if assigned_account == account_id {
+                return Some((block_index as u8, &self.blocks[block_index]));
+            }
         }
+        None
     }
 
-    /// Add a chunk location to the stripe
-    pub fn add_chunk(&mut self, location: ChunkLocation) {
-        self.chunks.push(location);
-    }
-
-    /// Get chunk location by index
-    pub fn get_chunk(&self, index: u8) -> Option<&ChunkLocation> {
-        self.chunks.iter().find(|c| c.chunk_index == index)
-    }
-
-    /// Get all chunks for a specific account
-    pub fn chunks_for_account(&self, account_id: u8) -> Vec<&ChunkLocation> {
-        self.chunks
+    /// Get all (block_index, account_id, data) tuples
+    pub fn all_blocks(&self) -> Vec<(u8, u8, &[u8])> {
+        self.blocks
             .iter()
-            .filter(|c| c.account_id == account_id)
+            .enumerate()
+            .zip(self.assignments.iter())
+            .map(|((block_idx, data), &account_id)| (block_idx as u8, account_id, data.as_slice()))
             .collect()
     }
 
-    /// Check if all chunks have been uploaded (have message IDs)
-    pub fn is_complete(&self) -> bool {
-        self.chunks.len() == self.total_chunks
-            && self.chunks.iter().all(|c| c.message_id.is_some())
+    /// Get the total number of blocks (N)
+    pub fn total_blocks(&self) -> usize {
+        self.blocks.len()
     }
 
-    /// Count available chunks (those with message IDs)
-    pub fn available_count(&self) -> usize {
-        self.chunks.iter().filter(|c| c.message_id.is_some()).count()
+    /// Get the number of parity blocks (N - K)
+    pub fn parity_count(&self) -> u8 {
+        (self.blocks.len() - self.data_count) as u8
     }
 
-    /// Check if stripe can be reconstructed (has at least K chunks)
-    pub fn can_reconstruct(&self) -> bool {
-        self.available_count() >= self.data_chunks
-    }
-
-    /// Get missing chunk indices
-    pub fn missing_chunks(&self) -> Vec<u8> {
-        let present: std::collections::HashSet<u8> =
-            self.chunks.iter().map(|c| c.chunk_index).collect();
-
-        (0..self.total_chunks as u8)
-            .filter(|i| !present.contains(i))
-            .collect()
+    /// Get the block size (all blocks have the same size)
+    pub fn block_size(&self) -> usize {
+        self.blocks.first().map(|b| b.len()).unwrap_or(0)
     }
 }
 
-/// Manages stripe creation and distribution across accounts
+/// Manages stripe creation and reconstruction
 pub struct StripeManager {
-    /// Number of data chunks (K)
-    data_chunks: usize,
-
-    /// Total chunks (N)
-    total_chunks: usize,
-
-    /// Next stripe ID to assign
-    next_stripe_id: u64,
-
-    /// Account assignment strategy
-    assignment_strategy: AssignmentStrategy,
-}
-
-/// Strategy for assigning chunks to accounts
-#[derive(Debug, Clone, Copy, Default)]
-pub enum AssignmentStrategy {
-    /// Round-robin across all accounts
-    #[default]
-    RoundRobin,
-
-    /// Distribute evenly based on current load
-    LoadBalanced,
-
-    /// Assign to accounts with highest priority first
-    PriorityBased,
+    encoder: Encoder,
+    num_accounts: usize,
 }
 
 impl StripeManager {
     /// Create a new stripe manager
-    pub fn new(data_chunks: usize, total_chunks: usize) -> Self {
-        StripeManager {
-            data_chunks,
-            total_chunks,
-            next_stripe_id: 1,
-            assignment_strategy: AssignmentStrategy::RoundRobin,
-        }
-    }
-
-    /// Create with a specific assignment strategy
-    pub fn with_strategy(mut self, strategy: AssignmentStrategy) -> Self {
-        self.assignment_strategy = strategy;
-        self
-    }
-
-    /// Set the next stripe ID (for recovery/continuation)
-    pub fn set_next_stripe_id(&mut self, id: u64) {
-        self.next_stripe_id = id;
-    }
-
-    /// Get the number of data chunks
-    pub fn data_chunks(&self) -> usize {
-        self.data_chunks
-    }
-
-    /// Get the total number of chunks
-    pub fn total_chunks(&self) -> usize {
-        self.total_chunks
-    }
-
-    /// Create a new stripe for a data block
     ///
     /// # Arguments
-    /// * `original_size` - Size of the original data in bytes
-    /// * `chunk_size` - Size of each encoded chunk
-    /// * `available_accounts` - List of account IDs available for storage
+    /// * `data_shards` - Number of data shards (K)
+    /// * `total_shards` - Total number of shards including parity (N)
+    /// * `num_accounts` - Number of accounts in the pool
     ///
-    /// # Returns
-    /// A new Stripe with chunk assignments
-    pub fn create_stripe(
-        &mut self,
-        original_size: u64,
-        chunk_size: usize,
-        available_accounts: &[u8],
-    ) -> Stripe {
-        let stripe_id = self.next_stripe_id;
-        self.next_stripe_id += 1;
-
-        let mut stripe = Stripe::new(
-            stripe_id,
-            original_size,
-            chunk_size,
-            self.data_chunks,
-            self.total_chunks,
-        );
-
-        // Assign chunks to accounts
-        let assignments = self.assign_chunks(available_accounts);
-        for (chunk_index, account_id) in assignments.iter().enumerate() {
-            let is_data = chunk_index < self.data_chunks;
-            let location = ChunkLocation::new(chunk_index as u8, *account_id, is_data);
-            stripe.add_chunk(location);
+    /// # Errors
+    /// Returns error if the encoder configuration is invalid
+    pub fn new(data_shards: usize, total_shards: usize, num_accounts: usize) -> Result<Self> {
+        if num_accounts == 0 {
+            return Err(Error::Config("num_accounts must be > 0".to_string()));
+        }
+        if num_accounts < total_shards {
+            return Err(Error::Config(format!(
+                "num_accounts ({}) must be >= total_shards ({})",
+                num_accounts, total_shards
+            )));
         }
 
-        stripe
+        let encoder = Encoder::new(data_shards, total_shards)?;
+
+        Ok(StripeManager {
+            encoder,
+            num_accounts,
+        })
     }
 
-    /// Assign chunks to accounts based on current strategy
-    fn assign_chunks(&self, available_accounts: &[u8]) -> Vec<u8> {
-        match self.assignment_strategy {
-            AssignmentStrategy::RoundRobin => {
-                self.assign_round_robin(available_accounts)
-            }
-            AssignmentStrategy::LoadBalanced | AssignmentStrategy::PriorityBased => {
-                // For now, fall back to round-robin
-                // Full implementation would track load/priority
-                self.assign_round_robin(available_accounts)
-            }
-        }
-    }
-
-    /// Round-robin assignment across accounts
-    fn assign_round_robin(&self, available_accounts: &[u8]) -> Vec<u8> {
-        let num_accounts = available_accounts.len();
-        (0..self.total_chunks)
-            .map(|i| available_accounts[i % num_accounts])
-            .collect()
-    }
-
-    /// Calculate how chunks should be redistributed when an account fails
+    /// Create a stripe from chunk data
+    ///
+    /// Encodes data using Reed-Solomon and assigns blocks to accounts
+    /// using rotating parity distribution.
     ///
     /// # Arguments
-    /// * `stripe` - The stripe to redistribute
-    /// * `failed_account` - Account ID that has failed
-    /// * `available_accounts` - Remaining available accounts
+    /// * `chunk_id` - The ID of the chunk this stripe belongs to
+    /// * `data` - The raw data to encode
+    /// * `stripe_index` - Index used to rotate parity assignments
     ///
     /// # Returns
-    /// Map of chunk_index -> new_account_id for chunks that need to be moved
-    pub fn plan_redistribution(
-        &self,
-        stripe: &Stripe,
-        failed_account: u8,
-        available_accounts: &[u8],
-    ) -> HashMap<u8, u8> {
-        let mut redistributions = HashMap::new();
+    /// A `Stripe` containing encoded blocks and account assignments
+    pub fn create_stripe(&self, chunk_id: ChunkId, data: &[u8], stripe_index: u64) -> Result<Stripe> {
+        // Encode data into shards
+        let blocks = self.encoder.encode(data)?;
 
-        // Find chunks on the failed account
-        let affected_chunks: Vec<u8> = stripe
-            .chunks
-            .iter()
-            .filter(|c| c.account_id == failed_account)
-            .map(|c| c.chunk_index)
-            .collect();
+        // Get account assignments for this stripe
+        let assignments = self.get_assignments(stripe_index);
 
-        // Exclude the failed account from available accounts
-        let remaining: Vec<u8> = available_accounts
-            .iter()
-            .copied()
-            .filter(|&id| id != failed_account)
-            .collect();
+        Ok(Stripe {
+            chunk_id,
+            blocks,
+            assignments,
+            data_count: self.encoder.data_shards(),
+        })
+    }
 
-        if remaining.is_empty() {
-            return redistributions;
+    /// Get account assignment for each block in a stripe
+    ///
+    /// Uses rotating parity distribution (like RAID5/6).
+    /// The stripe_index is used to rotate which account gets parity blocks.
+    ///
+    /// # Algorithm
+    /// For N total shards and stripe_index i:
+    /// - Parity blocks rotate through accounts to spread load evenly
+    /// - Example with 4 accounts, 3 data + 1 parity:
+    ///   - Stripe 0: [D0->A0, D1->A1, D2->A2, P->A3]
+    ///   - Stripe 1: [D0->A0, D1->A1, P->A2, D2->A3]
+    ///   - Stripe 2: [D0->A0, P->A1, D1->A2, D2->A3]
+    ///   - Stripe 3: [P->A0, D0->A1, D1->A2, D2->A3]
+    ///
+    /// # Arguments
+    /// * `stripe_index` - Index used to determine parity rotation
+    ///
+    /// # Returns
+    /// Vector of account IDs, where index corresponds to block_index
+    pub fn get_assignments(&self, stripe_index: u64) -> Vec<u8> {
+        let total_shards = self.encoder.total_shards();
+
+        // Calculate rotation offset based on stripe index
+        // This rotates which position(s) get parity blocks
+        let rotation = (stripe_index as usize) % total_shards;
+
+        // Build assignment array
+        // For each position, determine if it should be data or parity
+        // based on rotation
+        let mut assignments = Vec::with_capacity(total_shards);
+
+        // The parity blocks are at positions that "rotate" through the stripe
+        // For stripe_index 0: parity at positions [K, K+1, ..., N-1]
+        // For stripe_index 1: parity rotates left by 1
+        // etc.
+        for block_idx in 0..total_shards {
+            // Calculate which account this block goes to
+            // Account ID = block position in the rotated assignment
+            //
+            // We want to distribute blocks across accounts evenly.
+            // The simple approach: account_id = block_idx % num_accounts
+            // But we also want to rotate parity positions.
+            //
+            // For rotating parity: we shift assignments based on stripe_index
+            let account_id = (block_idx + rotation) % self.num_accounts;
+            assignments.push(account_id as u8);
         }
 
-        // Assign affected chunks to remaining accounts (round-robin)
-        for (i, chunk_index) in affected_chunks.iter().enumerate() {
-            let new_account = remaining[i % remaining.len()];
-            redistributions.insert(*chunk_index, new_account);
+        assignments
+    }
+
+    /// Reconstruct chunk data from available blocks
+    ///
+    /// # Arguments
+    /// * `blocks` - Vec of (block_index, data) for available blocks
+    ///
+    /// # Returns
+    /// Reconstructed original data
+    ///
+    /// # Errors
+    /// Returns error if not enough blocks are available (need at least K)
+    pub fn reconstruct(&self, blocks: &[(u8, Vec<u8>)]) -> Result<Vec<u8>> {
+        let total_shards = self.encoder.total_shards();
+
+        // Build the shard array for the encoder
+        let mut shards: Vec<Option<Vec<u8>>> = vec![None; total_shards];
+
+        for (block_index, data) in blocks {
+            let idx = *block_index as usize;
+            if idx >= total_shards {
+                return Err(Error::Internal(format!(
+                    "Block index {} out of range (max {})",
+                    idx,
+                    total_shards - 1
+                )));
+            }
+            shards[idx] = Some(data.clone());
         }
 
-        redistributions
+        // Decode using the encoder
+        self.encoder.decode(&mut shards)
+    }
+
+    /// Convert Stripe to StripeInfo (after upload with message IDs)
+    ///
+    /// # Arguments
+    /// * `stripe` - The stripe that was uploaded
+    /// * `message_ids` - Vec of (block_index, message_id) from successful uploads
+    ///
+    /// # Returns
+    /// A `StripeInfo` structure with block locations
+    pub fn to_stripe_info(&self, stripe: &Stripe, message_ids: &[(u8, i32)]) -> StripeInfo {
+        let total_shards = self.encoder.total_shards();
+        let data_shards = self.encoder.data_shards();
+        let parity_shards = total_shards - data_shards;
+        let block_size = stripe.block_size() as u64;
+
+        // Build message ID lookup
+        let message_id_map: std::collections::HashMap<u8, i32> =
+            message_ids.iter().cloned().collect();
+
+        // Create block locations
+        let blocks: Vec<BlockLocation> = (0..total_shards)
+            .map(|block_idx| {
+                let account_id = stripe.assignments[block_idx];
+                let message_id = message_id_map.get(&(block_idx as u8)).copied();
+                let uploaded_at = if message_id.is_some() {
+                    Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0),
+                    )
+                } else {
+                    None
+                };
+
+                BlockLocation {
+                    account_id,
+                    message_id,
+                    block_index: block_idx as u8,
+                    uploaded_at,
+                }
+            })
+            .collect();
+
+        StripeInfo {
+            blocks,
+            data_count: data_shards as u8,
+            parity_count: parity_shards as u8,
+            block_size,
+        }
+    }
+
+    /// Get the number of data shards (K)
+    pub fn data_shards(&self) -> usize {
+        self.encoder.data_shards()
+    }
+
+    /// Get the total number of shards (N)
+    pub fn total_shards(&self) -> usize {
+        self.encoder.total_shards()
+    }
+
+    /// Get the number of parity shards
+    pub fn parity_shards(&self) -> usize {
+        self.encoder.total_shards() - self.encoder.data_shards()
+    }
+
+    /// Get the number of accounts
+    pub fn num_accounts(&self) -> usize {
+        self.num_accounts
     }
 }
 
@@ -327,191 +294,381 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_stripe_creation() {
-        let stripe = Stripe::new(1, 1024, 512, 2, 3);
-        assert_eq!(stripe.stripe_id, 1);
-        assert_eq!(stripe.original_size, 1024);
-        assert_eq!(stripe.chunk_size, 512);
-        assert_eq!(stripe.data_chunks, 2);
-        assert_eq!(stripe.total_chunks, 3);
-        assert!(stripe.chunks.is_empty());
-    }
-
-    #[test]
-    fn test_chunk_location() {
-        let location = ChunkLocation::new(0, 1, true)
-            .with_message_id(12345)
-            .with_hash("abc123".to_string())
-            .mark_verified();
-
-        assert_eq!(location.chunk_index, 0);
-        assert_eq!(location.account_id, 1);
-        assert!(location.is_data);
-        assert_eq!(location.message_id, Some(12345));
-        assert_eq!(location.hash, Some("abc123".to_string()));
-        assert!(location.verified);
-    }
-
-    #[test]
-    fn test_stripe_add_chunks() {
-        let mut stripe = Stripe::new(1, 1024, 512, 2, 3);
-
-        stripe.add_chunk(ChunkLocation::new(0, 0, true));
-        stripe.add_chunk(ChunkLocation::new(1, 1, true));
-        stripe.add_chunk(ChunkLocation::new(2, 2, false));
-
-        assert_eq!(stripe.chunks.len(), 3);
-        assert!(stripe.get_chunk(0).is_some());
-        assert!(stripe.get_chunk(1).is_some());
-        assert!(stripe.get_chunk(2).is_some());
-        assert!(stripe.get_chunk(3).is_none());
-    }
-
-    #[test]
-    fn test_stripe_is_complete() {
-        let mut stripe = Stripe::new(1, 1024, 512, 2, 3);
-
-        stripe.add_chunk(ChunkLocation::new(0, 0, true).with_message_id(1));
-        stripe.add_chunk(ChunkLocation::new(1, 1, true).with_message_id(2));
-
-        // Not complete - missing chunk 2
-        assert!(!stripe.is_complete());
-
-        stripe.add_chunk(ChunkLocation::new(2, 2, false).with_message_id(3));
-
-        // Now complete
-        assert!(stripe.is_complete());
-    }
-
-    #[test]
-    fn test_stripe_can_reconstruct() {
-        let mut stripe = Stripe::new(1, 1024, 512, 2, 3);
-
-        // Add 2 chunks with message IDs (K=2)
-        stripe.add_chunk(ChunkLocation::new(0, 0, true).with_message_id(1));
-        stripe.add_chunk(ChunkLocation::new(1, 1, true).with_message_id(2));
-
-        assert!(stripe.can_reconstruct());
-        assert_eq!(stripe.available_count(), 2);
-    }
-
-    #[test]
-    fn test_stripe_missing_chunks() {
-        let mut stripe = Stripe::new(1, 1024, 512, 2, 3);
-
-        stripe.add_chunk(ChunkLocation::new(0, 0, true));
-        stripe.add_chunk(ChunkLocation::new(2, 2, false));
-
-        let missing = stripe.missing_chunks();
-        assert_eq!(missing, vec![1]);
-    }
-
-    #[test]
-    fn test_stripe_chunks_for_account() {
-        let mut stripe = Stripe::new(1, 1024, 512, 2, 4);
-
-        stripe.add_chunk(ChunkLocation::new(0, 0, true));
-        stripe.add_chunk(ChunkLocation::new(1, 1, true));
-        stripe.add_chunk(ChunkLocation::new(2, 0, false)); // Same account as chunk 0
-        stripe.add_chunk(ChunkLocation::new(3, 1, false));
-
-        let account_0_chunks = stripe.chunks_for_account(0);
-        assert_eq!(account_0_chunks.len(), 2);
-        assert_eq!(account_0_chunks[0].chunk_index, 0);
-        assert_eq!(account_0_chunks[1].chunk_index, 2);
-    }
-
-    #[test]
     fn test_stripe_manager_creation() {
-        let manager = StripeManager::new(3, 5);
-        assert_eq!(manager.data_chunks(), 3);
-        assert_eq!(manager.total_chunks(), 5);
+        // Valid configuration
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        assert_eq!(manager.data_shards(), 2);
+        assert_eq!(manager.total_shards(), 3);
+        assert_eq!(manager.parity_shards(), 1);
+        assert_eq!(manager.num_accounts(), 3);
     }
 
     #[test]
-    fn test_stripe_manager_create_stripe() {
-        let mut manager = StripeManager::new(2, 3);
-        let accounts = vec![0, 1, 2];
+    fn test_stripe_manager_invalid_config() {
+        // No accounts
+        assert!(StripeManager::new(2, 3, 0).is_err());
 
-        let stripe = manager.create_stripe(1024, 512, &accounts);
+        // Not enough accounts for shards
+        assert!(StripeManager::new(2, 3, 2).is_err());
 
-        assert_eq!(stripe.stripe_id, 1);
-        assert_eq!(stripe.chunks.len(), 3);
-        assert_eq!(stripe.data_chunks, 2);
-        assert_eq!(stripe.total_chunks, 3);
+        // Invalid shard config (delegated to Encoder)
+        assert!(StripeManager::new(0, 3, 3).is_err());
+        assert!(StripeManager::new(3, 3, 3).is_err());
+    }
 
-        // Check assignments
-        for chunk in &stripe.chunks {
-            assert!(accounts.contains(&chunk.account_id));
+    #[test]
+    fn test_create_stripe_basic() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Hello, World! Test data for stripe encoding.";
+        let chunk_id = "test_chunk_123".to_string();
+
+        let stripe = manager.create_stripe(chunk_id.clone(), data, 0).unwrap();
+
+        assert_eq!(stripe.chunk_id, chunk_id);
+        assert_eq!(stripe.blocks.len(), 3);
+        assert_eq!(stripe.assignments.len(), 3);
+        assert_eq!(stripe.data_count, 2);
+    }
+
+    #[test]
+    fn test_stripe_all_blocks() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+        let all_blocks = stripe.all_blocks();
+
+        assert_eq!(all_blocks.len(), 3);
+        for (block_idx, account_id, _data) in all_blocks {
+            assert!(block_idx < 3);
+            assert!(account_id < 3);
+        }
+    }
+
+    #[test]
+    fn test_stripe_block_for_account() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // Each account should have one block (with 3 accounts and 3 blocks)
+        for account_id in 0..3 {
+            let block = stripe.block_for_account(account_id);
+            assert!(block.is_some(), "Account {} should have a block", account_id);
         }
 
-        // First 2 chunks should be data, last should be parity
-        assert!(stripe.chunks[0].is_data);
-        assert!(stripe.chunks[1].is_data);
-        assert!(!stripe.chunks[2].is_data);
+        // Non-existent account should return None
+        assert!(stripe.block_for_account(99).is_none());
     }
 
     #[test]
-    fn test_stripe_manager_increments_id() {
-        let mut manager = StripeManager::new(2, 3);
-        let accounts = vec![0, 1, 2];
+    fn test_assignment_rotation_raid5_3accounts() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
 
-        let stripe1 = manager.create_stripe(1024, 512, &accounts);
-        let stripe2 = manager.create_stripe(2048, 512, &accounts);
+        // Check that assignments rotate with stripe_index
+        let assign0 = manager.get_assignments(0);
+        let assign1 = manager.get_assignments(1);
+        let assign2 = manager.get_assignments(2);
 
-        assert_eq!(stripe1.stripe_id, 1);
-        assert_eq!(stripe2.stripe_id, 2);
+        // With 3 shards and 3 accounts, each rotation should be different
+        assert_ne!(assign0, assign1);
+        assert_ne!(assign1, assign2);
+
+        // After 3 rotations, should cycle back
+        let assign3 = manager.get_assignments(3);
+        assert_eq!(assign0, assign3);
+
+        // Verify each stripe uses all accounts
+        for assignments in [&assign0, &assign1, &assign2] {
+            let mut used: Vec<bool> = vec![false; 3];
+            for &account in assignments {
+                used[account as usize] = true;
+            }
+            assert!(used.iter().all(|&x| x), "All accounts should be used");
+        }
     }
 
     #[test]
-    fn test_stripe_manager_round_robin() {
-        let mut manager = StripeManager::new(4, 6);
-        let accounts = vec![0, 1, 2];
+    fn test_assignment_rotation_raid5_4accounts() {
+        let manager = StripeManager::new(3, 4, 4).unwrap();
 
-        let stripe = manager.create_stripe(1024, 256, &accounts);
+        // With 4 shards and 4 accounts, parity rotates through positions
+        let assign0 = manager.get_assignments(0);
+        let assign1 = manager.get_assignments(1);
+        let assign2 = manager.get_assignments(2);
+        let assign3 = manager.get_assignments(3);
 
-        // With 3 accounts and 6 chunks, should see pattern: 0, 1, 2, 0, 1, 2
-        assert_eq!(stripe.chunks[0].account_id, 0);
-        assert_eq!(stripe.chunks[1].account_id, 1);
-        assert_eq!(stripe.chunks[2].account_id, 2);
-        assert_eq!(stripe.chunks[3].account_id, 0);
-        assert_eq!(stripe.chunks[4].account_id, 1);
-        assert_eq!(stripe.chunks[5].account_id, 2);
+        // Each assignment should be unique within one cycle
+        assert_ne!(assign0, assign1);
+        assert_ne!(assign1, assign2);
+        assert_ne!(assign2, assign3);
+
+        // After 4 rotations, should cycle back
+        let assign4 = manager.get_assignments(4);
+        assert_eq!(assign0, assign4);
     }
 
     #[test]
-    fn test_plan_redistribution() {
-        let mut manager = StripeManager::new(2, 3);
-        let accounts = vec![0, 1, 2];
+    fn test_create_and_reconstruct_all_blocks() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Hello, World! This is test data for reconstruction.";
+        let chunk_id = "test_chunk".to_string();
 
-        let stripe = manager.create_stripe(1024, 512, &accounts);
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
 
-        // Plan redistribution if account 0 fails
-        let remaining = vec![1, 2];
-        let plan = manager.plan_redistribution(&stripe, 0, &remaining);
+        // Reconstruct with all blocks
+        let all_blocks: Vec<(u8, Vec<u8>)> = stripe
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (i as u8, b.clone()))
+            .collect();
 
-        // Should have a plan for chunk 0 (was on account 0)
-        assert!(plan.contains_key(&0));
-        let new_account = plan.get(&0).unwrap();
-        assert!(remaining.contains(new_account));
+        let reconstructed = manager.reconstruct(&all_blocks).unwrap();
+        assert_eq!(reconstructed, data);
     }
 
     #[test]
-    fn test_set_next_stripe_id() {
-        let mut manager = StripeManager::new(2, 3);
-        manager.set_next_stripe_id(100);
+    fn test_reconstruct_with_missing_block() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data for reconstruction with missing block";
+        let chunk_id = "test".to_string();
 
-        let accounts = vec![0, 1, 2];
-        let stripe = manager.create_stripe(1024, 512, &accounts);
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
 
-        assert_eq!(stripe.stripe_id, 100);
+        // Reconstruct with only 2 blocks (minimum K=2)
+        let partial_blocks: Vec<(u8, Vec<u8>)> = vec![
+            (0, stripe.blocks[0].clone()),
+            (1, stripe.blocks[1].clone()),
+            // Missing block 2
+        ];
+
+        let reconstructed = manager.reconstruct(&partial_blocks).unwrap();
+        assert_eq!(reconstructed, data);
     }
 
     #[test]
-    fn test_assignment_strategy() {
-        let manager = StripeManager::new(2, 3)
-            .with_strategy(AssignmentStrategy::LoadBalanced);
+    fn test_reconstruct_with_parity_block() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test reconstruction using parity";
+        let chunk_id = "test".to_string();
 
-        assert_eq!(manager.data_chunks(), 2);
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // Reconstruct using one data block and one parity block
+        let partial_blocks: Vec<(u8, Vec<u8>)> = vec![
+            (0, stripe.blocks[0].clone()), // Data block
+            (2, stripe.blocks[2].clone()), // Parity block
+        ];
+
+        let reconstructed = manager.reconstruct(&partial_blocks).unwrap();
+        assert_eq!(reconstructed, data);
+    }
+
+    #[test]
+    fn test_reconstruct_insufficient_blocks() {
+        let manager = StripeManager::new(3, 5, 5).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // Only 2 blocks (need K=3)
+        let partial_blocks: Vec<(u8, Vec<u8>)> = vec![
+            (0, stripe.blocks[0].clone()),
+            (1, stripe.blocks[1].clone()),
+        ];
+
+        assert!(manager.reconstruct(&partial_blocks).is_err());
+    }
+
+    #[test]
+    fn test_to_stripe_info() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data for StripeInfo";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // Simulate message IDs from uploads
+        let message_ids: Vec<(u8, i32)> = vec![(0, 100), (1, 101), (2, 102)];
+
+        let stripe_info = manager.to_stripe_info(&stripe, &message_ids);
+
+        assert_eq!(stripe_info.data_count, 2);
+        assert_eq!(stripe_info.parity_count, 1);
+        assert_eq!(stripe_info.blocks.len(), 3);
+        assert!(stripe_info.block_size > 0);
+
+        // Verify block locations
+        for block in &stripe_info.blocks {
+            assert!(block.message_id.is_some());
+            assert!(block.uploaded_at.is_some());
+        }
+    }
+
+    #[test]
+    fn test_to_stripe_info_partial_upload() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // Only 2 blocks uploaded (block 1 failed)
+        let message_ids: Vec<(u8, i32)> = vec![(0, 100), (2, 102)];
+
+        let stripe_info = manager.to_stripe_info(&stripe, &message_ids);
+
+        // Block 0 should have message_id
+        assert!(stripe_info.blocks[0].message_id.is_some());
+
+        // Block 1 should NOT have message_id
+        assert!(stripe_info.blocks[1].message_id.is_none());
+
+        // Block 2 should have message_id
+        assert!(stripe_info.blocks[2].message_id.is_some());
+    }
+
+    #[test]
+    fn test_stripe_methods() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        assert_eq!(stripe.total_blocks(), 3);
+        assert_eq!(stripe.parity_count(), 1);
+        assert!(stripe.block_size() > 0);
+    }
+
+    #[test]
+    fn test_various_data_sizes() {
+        let manager = StripeManager::new(3, 5, 5).unwrap();
+
+        // Test various data sizes
+        for size in [1, 10, 100, 1000, 10000] {
+            let data: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
+            let chunk_id = format!("test_{}", size);
+
+            let stripe = manager.create_stripe(chunk_id, &data, 0).unwrap();
+
+            // Reconstruct with all blocks
+            let all_blocks: Vec<(u8, Vec<u8>)> = stripe
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (i as u8, b.clone()))
+                .collect();
+
+            let reconstructed = manager.reconstruct(&all_blocks).unwrap();
+            assert_eq!(reconstructed, data, "Failed for size {}", size);
+        }
+    }
+
+    #[test]
+    fn test_all_reconstruction_combinations_2_3() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test all reconstruction combinations";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // All valid combinations of 2 blocks out of 3
+        let combinations = [
+            vec![0, 1],
+            vec![0, 2],
+            vec![1, 2],
+            vec![0, 1, 2], // All blocks
+        ];
+
+        for indices in combinations {
+            let blocks: Vec<(u8, Vec<u8>)> = indices
+                .iter()
+                .map(|&i| (i, stripe.blocks[i as usize].clone()))
+                .collect();
+
+            let reconstructed = manager.reconstruct(&blocks).unwrap();
+            assert_eq!(
+                reconstructed, data,
+                "Failed for combination {:?}",
+                indices
+            );
+        }
+    }
+
+    #[test]
+    fn test_assignment_spread_across_stripes() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+
+        // Count how many times each account is assigned parity over many stripes
+        let mut parity_counts = vec![0usize; 3];
+
+        // Parity is at index (N-1) in unrotated form
+        // With rotation, it moves around
+        for stripe_idx in 0..30 {
+            let assignments = manager.get_assignments(stripe_idx);
+            // In a 2+1 config, the last block (index 2) is parity
+            // After rotation by stripe_idx, the parity position shifts
+            // But we're tracking which *account* gets assigned to each position
+            // The account at position 2 (the parity position in original layout)
+            // rotates as well
+            for (pos, &account) in assignments.iter().enumerate() {
+                // Track which account gets the "parity position" in original layout
+                if pos == 2 {
+                    parity_counts[account as usize] += 1;
+                }
+            }
+        }
+
+        // Each account should get roughly equal parity assignments
+        // With 30 stripes and 3 accounts, expect 10 each
+        for (account, count) in parity_counts.iter().enumerate() {
+            assert_eq!(
+                *count, 10,
+                "Account {} should have 10 parity assignments, got {}",
+                account, count
+            );
+        }
+    }
+
+    #[test]
+    fn test_reconstruct_with_invalid_block_index() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+
+        let blocks: Vec<(u8, Vec<u8>)> = vec![
+            (0, vec![1, 2, 3]),
+            (99, vec![4, 5, 6]), // Invalid index
+        ];
+
+        assert!(manager.reconstruct(&blocks).is_err());
+    }
+
+    #[test]
+    fn test_stripe_info_can_reconstruct() {
+        let manager = StripeManager::new(2, 3, 3).unwrap();
+        let data = b"Test data";
+        let chunk_id = "test".to_string();
+
+        let stripe = manager.create_stripe(chunk_id, data, 0).unwrap();
+
+        // All blocks uploaded
+        let all_message_ids: Vec<(u8, i32)> = vec![(0, 100), (1, 101), (2, 102)];
+        let stripe_info = manager.to_stripe_info(&stripe, &all_message_ids);
+        assert!(stripe_info.can_reconstruct());
+
+        // Only K blocks uploaded (minimum)
+        let min_message_ids: Vec<(u8, i32)> = vec![(0, 100), (1, 101)];
+        let stripe_info = manager.to_stripe_info(&stripe, &min_message_ids);
+        assert!(stripe_info.can_reconstruct());
+
+        // Less than K blocks uploaded
+        let insufficient_ids: Vec<(u8, i32)> = vec![(0, 100)];
+        let stripe_info = manager.to_stripe_info(&stripe, &insufficient_ids);
+        assert!(!stripe_info.can_reconstruct());
     }
 }
