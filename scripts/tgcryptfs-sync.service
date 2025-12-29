@@ -1,0 +1,40 @@
+[Unit]
+Description=tgcryptfs Home Directory Sync Daemon
+Documentation=https://github.com/damienheiser/tgcryptfs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tgcryptfs-sync.sh daemon
+Restart=on-failure
+RestartSec=60
+
+# Run as user (set User= to your username, or use systemctl --user)
+# User=hedon
+
+# Environment
+Environment=TGCRYPTFS_SYNC_INTERVAL=3600
+Environment=TGCRYPTFS_MOUNT=%h/mnt/tgcryptfs
+Environment=TGCRYPTFS_BACKUP_DIR=%h/mnt/tgcryptfs/home
+Environment=TGCRYPTFS_PASSWORD_FILE=%h/.local/share/tgcryptfs/encryption.key
+Environment=TGCRYPTFS_EXCLUDES=%h/.local/share/tgcryptfs/rsync-excludes.txt
+Environment=TGCRYPTFS_BIN=/usr/local/bin/tgcryptfs
+
+# Logging to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tgcryptfs-sync
+
+# Resource limits
+Nice=10
+IOSchedulingClass=idle
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/mnt/tgcryptfs %h/.local/share/tgcryptfs
+
+[Install]
+WantedBy=default.target

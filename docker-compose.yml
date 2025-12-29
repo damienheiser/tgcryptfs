@@ -1,0 +1,82 @@
+# tgcryptfs Docker Compose configuration
+# Usage:
+#   1. First run auth: docker-compose run --rm tgcryptfs auth
+#   2. Then start mount: docker-compose up -d
+#   3. Access files: docker exec -it tgcryptfs ls /mnt/tgcryptfs
+
+services:
+  tgcryptfs:
+    build: .
+    image: tgcryptfs:latest
+    container_name: tgcryptfs
+    restart: unless-stopped
+
+    # Required for FUSE
+    privileged: true
+    devices:
+      - /dev/fuse:/dev/fuse
+
+    # Capabilities for FUSE
+    cap_add:
+      - SYS_ADMIN
+
+    # Security options for FUSE
+    security_opt:
+      - apparmor:unconfined
+
+    volumes:
+      # Persistent data (session, config, keys)
+      - tgcryptfs-data:/data
+      # Optional: mount point accessible from host
+      # - ./mnt:/mnt/tgcryptfs:rshared
+      # Optional: backup source (for sync mode)
+      # - /path/to/backup:/backup:ro
+
+    environment:
+      - TGCRYPTFS_DATA_DIR=/data
+      - TGCRYPTFS_MOUNT=/mnt/tgcryptfs
+      - TGCRYPTFS_PASSWORD_FILE=/data/encryption.key
+      # For sync mode:
+      # - TGCRYPTFS_SYNC_INTERVAL=3600
+      # - TGCRYPTFS_BACKUP_DIR=/mnt/tgcryptfs/backup
+
+    # Default: mount mode
+    command: mount
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "mount", "|", "grep", "-q", "tgcryptfs"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Sync daemon (optional - runs alongside mount)
+  tgcryptfs-sync:
+    build: .
+    image: tgcryptfs:latest
+    container_name: tgcryptfs-sync
+    restart: unless-stopped
+    depends_on:
+      tgcryptfs:
+        condition: service_healthy
+
+    volumes:
+      - tgcryptfs-data:/data
+      # Source to backup
+      - ${HOME:-/home}:/source:ro
+
+    environment:
+      - TGCRYPTFS_DATA_DIR=/data
+      - TGCRYPTFS_MOUNT=/mnt/tgcryptfs
+      - TGCRYPTFS_BACKUP_DIR=/mnt/tgcryptfs/home
+      - TGCRYPTFS_SYNC_INTERVAL=3600
+
+    command: sync
+
+    profiles:
+      - sync  # Only starts with: docker-compose --profile sync up
+
+volumes:
+  tgcryptfs-data:
+    driver: local
