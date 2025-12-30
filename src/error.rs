@@ -117,6 +117,31 @@ pub enum Error {
     #[error("Duplicate operation: {0}")]
     DuplicateOperation(String),
 
+    // Erasure coding errors
+    #[error("Erasure degraded: {available}/{required} accounts available")]
+    ErasureDegraded { available: usize, required: usize },
+
+    #[error("Erasure failed: only {available} accounts, need {required}")]
+    ErasureFailed { available: usize, required: usize },
+
+    #[error("Account {0} unavailable: {1}")]
+    AccountUnavailable(u8, String),
+
+    #[error("Stripe unrecoverable: only {available} of {required} blocks available")]
+    StripeUnrecoverable { available: usize, required: usize },
+
+    #[error("Erasure encoding failed: {0}")]
+    ErasureEncode(String),
+
+    #[error("Erasure decoding failed: {0}")]
+    ErasureDecode(String),
+
+    #[error("Invalid erasure configuration: {0}")]
+    InvalidErasureConfig(String),
+
+    #[error("Rebuild failed for account {account}: {reason}")]
+    RebuildFailed { account: u8, reason: String },
+
     // Config errors
     #[error("Configuration error: {0}")]
     Config(String),

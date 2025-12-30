@@ -40,6 +40,9 @@ bincode = "1"
 # Compression
 lz4_flex = "0.11"
 
+# Erasure coding
+reed-solomon-erasure = "6.0"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 
@@ -50,6 +53,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Error handling
 thiserror = "1"
 anyhow = "1"
+
+# Async utilities
+futures = "0.3"
 
 # Utilities
 bytes = "1"

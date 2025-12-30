@@ -285,6 +285,10 @@ pub struct ConfigV2 {
     #[serde(default)]
     pub logging: LoggingConfig,
 
+    /// RAID/Erasure coding pool configuration
+    #[serde(default)]
+    pub pool: Option<crate::raid::PoolConfig>,
+
     /// Path to the data directory
     #[serde(skip)]
     pub data_dir: PathBuf,
@@ -733,6 +737,7 @@ impl Default for ConfigV2 {
                 eviction_policy: EvictionPolicy::Lru,
             },
             logging: LoggingConfig::default(),
+            pool: None,
             data_dir,
         }
     }

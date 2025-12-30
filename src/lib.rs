@@ -12,6 +12,7 @@ pub mod error;
 pub mod fs;
 pub mod metadata;
 pub mod migration;
+pub mod raid;
 pub mod snapshot;
 pub mod telegram;
 

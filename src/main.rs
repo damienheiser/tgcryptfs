@@ -151,6 +151,10 @@ enum Commands {
     #[command(subcommand)]
     Cluster(ClusterCommands),
 
+    /// RAID/Erasure coding management
+    #[command(subcommand)]
+    Raid(RaidCommands),
+
     /// Migrate HKDF from telegramfs-* to tgcryptfs-*
     Migrate {
         /// Read encryption password from file
@@ -232,6 +236,55 @@ enum ClusterCommands {
 
     /// Show cluster status
     Status,
+}
+
+#[derive(Subcommand)]
+enum RaidCommands {
+    /// Show RAID array status
+    Status,
+
+    /// Rebuild data for a failed account
+    Rebuild {
+        /// Account ID to rebuild (0-indexed)
+        account_id: u8,
+    },
+
+    /// Verify all stripes (scrub operation)
+    Scrub {
+        /// Fix any issues found
+        #[arg(long)]
+        repair: bool,
+    },
+
+    /// Add a new account to the pool
+    AddAccount {
+        /// Telegram API ID
+        #[arg(long)]
+        api_id: i32,
+
+        /// Telegram API hash
+        #[arg(long)]
+        api_hash: String,
+
+        /// Session file path
+        #[arg(long)]
+        session_file: PathBuf,
+
+        /// Phone number (optional, can prompt later)
+        #[arg(long)]
+        phone: Option<String>,
+    },
+
+    /// Migrate existing single-account data to erasure-coded multi-account
+    MigrateToErasure {
+        /// Perform a dry run (don't modify data)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Delete old single-account messages after successful migration
+        #[arg(long)]
+        delete_old: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -333,6 +386,8 @@ fn run_command(command: Commands, config_path: &PathBuf) -> Result<()> {
 
         Commands::Cluster(cluster_cmd) => run_cluster_command(cluster_cmd, config_path),
 
+        Commands::Raid(raid_cmd) => run_raid_command(raid_cmd, config_path),
+
         Commands::Migrate {
             password_file,
             dry_run,
@@ -368,6 +423,23 @@ fn run_cluster_command(command: ClusterCommands, config_path: &PathBuf) -> Resul
         ClusterCommands::Create { cluster_id } => cmd_cluster_create(config_path, cluster_id),
         ClusterCommands::Join { cluster_id, role } => cmd_cluster_join(config_path, cluster_id, role),
         ClusterCommands::Status => cmd_cluster_status(config_path),
+    }
+}
+
+fn run_raid_command(command: RaidCommands, config_path: &PathBuf) -> Result<()> {
+    match command {
+        RaidCommands::Status => cmd_raid_status(config_path),
+        RaidCommands::Rebuild { account_id } => cmd_raid_rebuild(config_path, account_id),
+        RaidCommands::Scrub { repair } => cmd_raid_scrub(config_path, repair),
+        RaidCommands::AddAccount {
+            api_id,
+            api_hash,
+            session_file,
+            phone,
+        } => cmd_raid_add_account(config_path, api_id, api_hash, session_file, phone),
+        RaidCommands::MigrateToErasure { dry_run, delete_old } => {
+            cmd_raid_migrate(config_path, dry_run, delete_old)
+        }
     }
 }
 
@@ -1115,6 +1187,264 @@ fn cmd_migrate(
     println!("  1. Update the HKDF strings in src/crypto/keys.rs to use 'tgcryptfs-*'");
     println!("  2. Rebuild and reinstall tgcryptfs");
     println!("  3. Test mounting the filesystem");
+
+    Ok(())
+}
+
+fn cmd_raid_status(config_path: &PathBuf) -> Result<()> {
+    use tgcryptfs::config::ConfigV2;
+    use tgcryptfs::raid::{AccountPool, ArrayStatus};
+
+    let config = ConfigV2::load(config_path)?;
+
+    // Check if erasure coding is configured
+    let pool_config = config.pool.ok_or_else(|| {
+        Error::InvalidConfig("No pool configuration found. Run 'tgcryptfs raid add-account' first.".to_string())
+    })?;
+
+    if !pool_config.erasure.enabled {
+        println!("Erasure coding is disabled.");
+        return Ok(());
+    }
+
+    println!("RAID Array Status");
+    println!("=================");
+    println!();
+
+    println!("Configuration:");
+    println!("  Data chunks (K): {}", pool_config.erasure.data_chunks);
+    println!("  Total chunks (N): {}", pool_config.erasure.total_chunks);
+    println!("  Fault tolerance: {} account(s)", pool_config.erasure.parity_chunks());
+    println!("  Preset: {:?}", pool_config.erasure.preset);
+    println!();
+
+    println!("Accounts ({}):", pool_config.accounts.len());
+    for account in &pool_config.accounts {
+        let status = if account.enabled { "enabled" } else { "disabled" };
+        println!("  [{}] {} - {:?} ({})",
+            account.account_id,
+            account.phone.as_deref().unwrap_or("no phone"),
+            account.session_file,
+            status
+        );
+    }
+    println!();
+
+    // Try to connect and get live status
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Internal(e.to_string()))?;
+    runtime.block_on(async {
+        match AccountPool::new(pool_config) {
+            Ok(pool) => {
+                if let Err(e) = pool.connect_all().await {
+                    warn!("Could not connect to all accounts: {}", e);
+                }
+
+                let health = pool.health();
+                println!("Array Status: {:?}", health.status);
+                println!("Healthy accounts: {}/{}", pool.healthy_count(), pool.account_count());
+
+                match health.status {
+                    ArrayStatus::Healthy => println!("  All accounts operational, full redundancy."),
+                    ArrayStatus::Degraded => println!("  WARNING: Operating with reduced redundancy!"),
+                    ArrayStatus::Failed => println!("  CRITICAL: Not enough accounts available!"),
+                    ArrayStatus::Rebuilding => println!("  Rebuild in progress..."),
+                }
+
+                println!();
+                println!("Account Health:");
+                for account_health in &health.accounts {
+                    println!("  [{}] {:?} - {} ops, {:.1}% error rate",
+                        account_health.account_id,
+                        account_health.status,
+                        account_health.total_operations,
+                        account_health.error_rate() * 100.0
+                    );
+                    if let Some(err) = &account_health.last_error {
+                        println!("      Last error: {}", err);
+                    }
+                }
+
+                pool.disconnect_all().await;
+            }
+            Err(e) => {
+                warn!("Could not create account pool: {}", e);
+                println!("Status: Unable to connect ({})", e);
+            }
+        }
+        Ok::<_, Error>(())
+    })?;
+
+    Ok(())
+}
+
+fn cmd_raid_rebuild(config_path: &PathBuf, account_id: u8) -> Result<()> {
+    use tgcryptfs::config::ConfigV2;
+
+    info!("Starting rebuild for account {}...", account_id);
+
+    let config = ConfigV2::load(config_path)?;
+
+    let pool_config = config.pool.ok_or_else(|| {
+        Error::InvalidConfig("No pool configuration found.".to_string())
+    })?;
+
+    if account_id as usize >= pool_config.accounts.len() {
+        return Err(Error::InvalidConfig(format!(
+            "Account {} not found. Valid range: 0-{}",
+            account_id,
+            pool_config.accounts.len() - 1
+        )));
+    }
+
+    println!("Rebuild for account {} not yet fully implemented.", account_id);
+    println!("This will:");
+    println!("  1. Mark account {} as rebuilding", account_id);
+    println!("  2. For each stripe with a block on this account:");
+    println!("     - Download K blocks from other accounts");
+    println!("     - Reconstruct the missing block using Reed-Solomon");
+    println!("     - Re-upload to account {}", account_id);
+    println!("  3. Mark account as healthy when complete");
+
+    Ok(())
+}
+
+fn cmd_raid_scrub(config_path: &PathBuf, repair: bool) -> Result<()> {
+    use tgcryptfs::config::ConfigV2;
+
+    info!("Starting scrub operation...");
+    if repair {
+        info!("Repair mode enabled - will fix issues found");
+    }
+
+    let config = ConfigV2::load(config_path)?;
+
+    let _pool_config = config.pool.ok_or_else(|| {
+        Error::InvalidConfig("No pool configuration found.".to_string())
+    })?;
+
+    println!("Scrub operation not yet fully implemented.");
+    println!("This will:");
+    println!("  1. Iterate through all stored stripes");
+    println!("  2. Download all blocks for each stripe");
+    println!("  3. Verify Reed-Solomon decoding succeeds");
+    println!("  4. Report any inconsistencies");
+    if repair {
+        println!("  5. Re-upload any missing/corrupted blocks");
+    }
+
+    Ok(())
+}
+
+fn cmd_raid_add_account(
+    config_path: &PathBuf,
+    api_id: i32,
+    api_hash: String,
+    session_file: PathBuf,
+    phone: Option<String>,
+) -> Result<()> {
+    use tgcryptfs::config::ConfigV2;
+    use tgcryptfs::raid::config::AccountConfig;
+
+    info!("Adding new account to pool...");
+
+    let mut config = if config_path.exists() {
+        ConfigV2::load(config_path)?
+    } else {
+        ConfigV2::from_env()?
+    };
+
+    // Get or create pool config
+    let mut pool_config = config.pool.take().unwrap_or_default();
+
+    // Determine next account ID
+    let next_id = pool_config.accounts.iter()
+        .map(|a| a.account_id)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+
+    // Create account config
+    let account = AccountConfig::new(next_id, api_id, api_hash, session_file.clone());
+    let account = if let Some(p) = phone {
+        account.with_phone(p)
+    } else {
+        account
+    };
+
+    pool_config.accounts.push(account);
+
+    // Update erasure config based on account count
+    let account_count = pool_config.accounts.len();
+    if account_count >= 2 {
+        // Default to RAID5-style (can lose 1 account)
+        pool_config.erasure.total_chunks = account_count;
+        pool_config.erasure.data_chunks = account_count - 1;
+        pool_config.erasure.enabled = true;
+    }
+
+    config.pool = Some(pool_config);
+
+    // Ensure parent directory exists
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    config.save(config_path)?;
+
+    println!("Account added successfully:");
+    println!("  Account ID: {}", next_id);
+    println!("  Session file: {:?}", session_file);
+    println!("  Total accounts: {}", account_count);
+    println!();
+    println!("Current erasure config:");
+    println!("  Data chunks (K): {}", config.pool.as_ref().unwrap().erasure.data_chunks);
+    println!("  Total chunks (N): {}", config.pool.as_ref().unwrap().erasure.total_chunks);
+    println!();
+    println!("Next steps:");
+    println!("  1. Run 'tgcryptfs auth --phone <phone>' to authenticate this account");
+    println!("  2. Run 'tgcryptfs raid status' to verify the pool");
+
+    Ok(())
+}
+
+fn cmd_raid_migrate(config_path: &PathBuf, dry_run: bool, delete_old: bool) -> Result<()> {
+    use tgcryptfs::config::ConfigV2;
+
+    info!("Starting migration to erasure-coded storage...");
+    if dry_run {
+        info!("DRY RUN MODE - no changes will be made");
+    }
+    if delete_old {
+        info!("Will delete old single-account messages after migration");
+    }
+
+    let config = ConfigV2::load(config_path)?;
+
+    let pool_config = config.pool.ok_or_else(|| {
+        Error::InvalidConfig("No pool configuration found. Add accounts first.".to_string())
+    })?;
+
+    if pool_config.accounts.len() < 2 {
+        return Err(Error::InvalidConfig(
+            "At least 2 accounts required for erasure coding.".to_string()
+        ));
+    }
+
+    println!("Migration to erasure coding not yet fully implemented.");
+    println!();
+    println!("This will:");
+    println!("  1. Read existing chunk manifests from metadata");
+    println!("  2. For each chunk stored on a single account:");
+    println!("     - Download the chunk");
+    println!("     - Encode into {} blocks using Reed-Solomon", pool_config.erasure.total_chunks);
+    println!("     - Upload blocks to {} accounts in parallel", pool_config.accounts.len());
+    println!("     - Update manifest with ErasureChunkRef");
+    if delete_old {
+        println!("  3. Delete old single-account messages");
+    }
+    println!();
+    println!("Accounts configured: {}", pool_config.accounts.len());
+    println!("Erasure config: {}-of-{}", pool_config.erasure.data_chunks, pool_config.erasure.total_chunks);
 
     Ok(())
 }
