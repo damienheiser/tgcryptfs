@@ -1,6 +1,6 @@
 [package]
 name = "tgcryptfs"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 authors = ["tgcryptfs Contributors"]
 description = "Encrypted cloud-backed filesystem using FUSE"
